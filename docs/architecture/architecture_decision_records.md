@@ -10,7 +10,7 @@ This document contains the Architecture Decision Records for the AYBIZA platform
 We need a technology stack that can handle real-time voice processing with ultra-low latency (<50ms US/UK, <100ms globally) at massive scale through hybrid Cloudflare+AWS architecture, while maintaining high reliability and fault tolerance with Claude 3.7 Sonnet integration.
 
 ### Decision
-We will use Elixir 1.18.3/OTP 27.3.4 as our primary technology stack for the AYBIZA platform's hybrid architecture, optimized for edge processing and Claude 3.7 Sonnet integration.
+We will use Elixir 1.18.3/OTP 28.0 as our primary technology stack for the AYBIZA platform's hybrid architecture, optimized for edge processing and Claude 3.7 Sonnet integration.
 
 ### Consequences
 - **Positive**:

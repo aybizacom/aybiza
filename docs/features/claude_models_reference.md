@@ -139,7 +139,7 @@ defmodule Aybiza.AWS.BedrockExtendedThinking do
       "temperature" => 0.3  # Fixed for thinking mode
     }
     
-    case ExAws.Bedrock.invoke_model(payload) |> ExAws.request() do
+    case AWS.BedrockRuntime.converse(client(), payload) do
       {:ok, response} ->
         # Response includes both thinking and final answer
         %{

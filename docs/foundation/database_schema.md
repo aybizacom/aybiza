@@ -1,19 +1,26 @@
-# AYBIZA AI Voice Agent Platform - Database Schema
+# AYBIZA AI Voice Agent Platform - Database Schema (Billion-Scale)
 
-## PostgreSQL 16.9+ with TimescaleDB 2.20.0+ Database Design
+## Hybrid Database Architecture for Billion-Scale Operations
 
-### Database Configuration
-- **PostgreSQL Version**: 16.9+ with enhanced performance features
-- **TimescaleDB Version**: 2.20.0+ with continuous aggregates and improved compression
-- **Encoding**: UTF8 with ICU collation support
-- **Connection Pooling**: PgBouncer with optimized pool settings
-- **Replication**: Aurora Global Database with cross-region read replicas
-- **Backup**: Point-in-time recovery with 30-day retention
+### Primary Database Stack
+- **PostgreSQL**: 16.9+ with Citus 12.1+ for horizontal sharding
+- **DynamoDB**: For hot data (agent state, real-time sessions)
+- **Pinecone/Weaviate**: Vector DB for semantic memory and embeddings
+- **Redis**: 7.2+ for session cache and rate limiting
+- **S3**: Call recordings, transcripts, Files API storage
+- **TimescaleDB**: 2.20.0+ for time-series analytics
+
+### PostgreSQL Configuration with Citus
+- **Sharding Strategy**: Distributed by tenant_id across 128 shards
+- **Connection Pooling**: PgBouncer with 10,000+ connection capacity
+- **Replication**: Multi-region active-active with conflict resolution
+- **Backup**: Continuous archiving with indefinite retention for compliance
 
 ### Schema: agent_manager
 
 #### Table: organizations
 - `id`: UUID (PK)
+- `account_id`: VARCHAR(20) UNIQUE NOT NULL -- Format: AYB-XXXX-XXXX-XXXX
 - `name`: VARCHAR(255) NOT NULL
 - `slug`: VARCHAR(100) UNIQUE NOT NULL
 - `settings`: JSONB DEFAULT '{}'
@@ -80,6 +87,7 @@
 
 #### Table: users
 - `id`: UUID (PK)
+- `user_id`: VARCHAR(20) UNIQUE NOT NULL -- Format: USR-XXXXXXXXXX
 - `email`: VARCHAR(255) UNIQUE NOT NULL
 - `encrypted_password`: VARCHAR(255) NOT NULL
 - `full_name`: VARCHAR(255) NOT NULL
@@ -131,7 +139,12 @@
   "default": "claude-3-5-sonnet-v2",
   "fast": "claude-3-5-haiku", 
   "complex": "claude-3-7-sonnet",
-  "selection_strategy": "auto"
+  "opus_4": "anthropic.claude-opus-4-20250514-v1:0",
+  "sonnet_4": "anthropic.claude-sonnet-4-20250514-v1:0",
+  "selection_strategy": "auto",
+  "extended_thinking": false,
+  "prompt_caching_enabled": true,
+  "cache_ttl_seconds": 3600
 }'
 - `settings`: JSONB DEFAULT '{}'
 - `status`: VARCHAR(50) DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'inactive', 'archived'))
@@ -145,9 +158,14 @@
 - `temperature`: DECIMAL(3,2) DEFAULT 0.3
 - `automation_config`: JSONB DEFAULT '{
   "tools_enabled": true,
-  "max_tool_calls": 5,
+  "max_tool_calls": 10,
+  "parallel_tool_execution": true,
   "async_workflows": true,
-  "timeout_ms": 30000
+  "timeout_ms": 30000,
+  "mcp_enabled": false,
+  "code_execution_enabled": false,
+  "files_api_enabled": false,
+  "web_search_enabled": true
 }'
 - `phone_integration_type`: VARCHAR(20) DEFAULT 'managed' CHECK (phone_integration_type IN ('managed', 'sip_trunk', 'twilio'))
 - `edge_optimization`: JSONB DEFAULT '{
@@ -290,6 +308,108 @@
 - `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
 - `created_by_id`: UUID NOT NULL REFERENCES users(id)
 - `updated_by_id`: UUID REFERENCES users(id)
+
+### Schema: agent_intelligence (NEW - Claude 4 Capabilities)
+
+#### Table: agent_sessions (DynamoDB Primary)
+- `agent_session_id`: UUID (PK)
+- `agent_id`: UUID NOT NULL
+- `tenant_id`: UUID NOT NULL
+- `session_state`: JSONB -- Real-time agent state
+- `active_tools`: JSONB DEFAULT '[]' -- Currently executing tools
+- `memory_context`: JSONB DEFAULT '{}' -- Working memory
+- `conversation_buffer`: JSONB DEFAULT '[]' -- Recent turns
+- `model_in_use`: VARCHAR(100) -- Current Claude model
+- `thinking_state`: VARCHAR(50) CHECK (thinking_state IN ('idle', 'thinking', 'extended_thinking'))
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `ttl`: INTEGER DEFAULT 3600 -- DynamoDB TTL
+
+#### Table: agent_configurations
+- `id`: UUID (PK)
+- `agent_id`: UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE
+- `tenant_id`: UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE
+- `claude_4_config`: JSONB DEFAULT '{
+  "opus_enabled": true,
+  "sonnet_enabled": true,
+  "extended_thinking_allowed": false,
+  "max_thinking_time_ms": 30000,
+  "parallel_tools_max": 5,
+  "code_execution_allowed": false,
+  "mcp_connectors": [],
+  "files_api_enabled": false,
+  "web_search_enabled": true,
+  "prompt_cache_strategy": "adaptive"
+}'
+- `tool_permissions`: JSONB DEFAULT '{}' -- Granular tool access
+- `memory_config`: JSONB DEFAULT '{
+  "vector_db_enabled": true,
+  "max_memory_items": 1000,
+  "memory_ttl_days": 365
+}'
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `version`: INTEGER DEFAULT 1
+
+#### Table: agent_memories (Vector DB Primary)
+- `id`: UUID (PK)
+- `agent_id`: UUID NOT NULL
+- `tenant_id`: UUID NOT NULL
+- `memory_type`: VARCHAR(50) CHECK (memory_type IN ('fact', 'preference', 'context', 'skill'))
+- `content`: TEXT NOT NULL
+- `embedding`: VECTOR(1536) -- For semantic search
+- `metadata`: JSONB DEFAULT '{}'
+- `importance_score`: DECIMAL(3,2) DEFAULT 0.50
+- `access_count`: INTEGER DEFAULT 0
+- `last_accessed`: TIMESTAMP(6) WITH TIME ZONE
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `expires_at`: TIMESTAMP(6) WITH TIME ZONE
+
+#### Table: mcp_connectors
+- `id`: UUID (PK)
+- `tenant_id`: UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE
+- `name`: VARCHAR(255) NOT NULL
+- `connector_type`: VARCHAR(100) NOT NULL -- 'hubspot', 'postgresql', 'google_drive', etc.
+- `configuration`: JSONB NOT NULL -- Encrypted connection details
+- `permissions`: JSONB DEFAULT '{}'
+- `status`: VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'error'))
+- `last_health_check`: TIMESTAMP(6) WITH TIME ZONE
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+
+#### Table: agent_files (S3 + Metadata)
+- `id`: UUID (PK)
+- `file_key`: VARCHAR(500) UNIQUE NOT NULL -- S3 key
+- `agent_id`: UUID NOT NULL
+- `tenant_id`: UUID NOT NULL
+- `file_name`: VARCHAR(255) NOT NULL
+- `file_type`: VARCHAR(100) NOT NULL
+- `file_size_bytes`: BIGINT NOT NULL
+- `content_hash`: VARCHAR(64) NOT NULL -- SHA-256
+- `metadata`: JSONB DEFAULT '{}'
+- `access_permissions`: JSONB DEFAULT '{}'
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `last_accessed`: TIMESTAMP(6) WITH TIME ZONE
+- `access_count`: INTEGER DEFAULT 0
+- `expires_at`: TIMESTAMP(6) WITH TIME ZONE
+
+#### Table: tool_executions (TimescaleDB Hypertable)
+- `id`: UUID (PK)
+- `timestamp`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `agent_id`: UUID NOT NULL
+- `tenant_id`: UUID NOT NULL
+- `call_sid`: VARCHAR(255)
+- `tool_name`: VARCHAR(255) NOT NULL
+- `tool_type`: VARCHAR(100) NOT NULL
+- `execution_mode`: VARCHAR(50) CHECK (execution_mode IN ('sequential', 'parallel'))
+- `input_data`: JSONB NOT NULL
+- `output_data`: JSONB
+- `status`: VARCHAR(50) CHECK (status IN ('pending', 'running', 'completed', 'failed'))
+- `started_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL
+- `completed_at`: TIMESTAMP(6) WITH TIME ZONE
+- `duration_ms`: INTEGER
+- `error_details`: JSONB
+- `cost_usd`: DECIMAL(10,6) DEFAULT 0.00
 
 ### Schema: call_analytics (Enhanced with TimescaleDB)
 
@@ -541,6 +661,61 @@
 - `retry_count`: INTEGER DEFAULT 0
 - `cost_usd`: DECIMAL(10,6) DEFAULT 0.00
 
+### Schema: compliance (NEW - Consent & Call Recording Management)
+
+#### Table: consent_records
+- `id`: UUID (PK)
+- `tenant_id`: UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE
+- `phone_number`: VARCHAR(20) NOT NULL
+- `consent_type`: VARCHAR(50) NOT NULL CHECK (consent_type IN ('marketing', 'service', 'emergency'))
+- `consent_status`: VARCHAR(50) NOT NULL CHECK (consent_status IN ('opted_in', 'opted_out', 'expired'))
+- `opted_in_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL
+- `opted_out_at`: TIMESTAMP(6) WITH TIME ZONE
+- `expires_at`: TIMESTAMP(6) WITH TIME ZONE
+- `verification_method`: VARCHAR(50) NOT NULL CHECK (verification_method IN ('checkbox', 'sms', 'voice', 'email', 'trusted_form'))
+- `verification_details`: JSONB DEFAULT '{}'
+- `ip_address`: INET
+- `user_agent`: TEXT
+- `source`: VARCHAR(100) -- 'web_form', 'api', 'import', etc.
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `created_by_id`: UUID REFERENCES users(id)
+- INDEX idx_consent_phone_type (phone_number, consent_type, consent_status)
+- INDEX idx_consent_tenant_status (tenant_id, consent_status, expires_at)
+
+#### Table: call_recordings
+- `id`: UUID (PK)
+- `call_id`: UUID NOT NULL REFERENCES calls(id) ON DELETE CASCADE
+- `call_sid`: VARCHAR(255) NOT NULL
+- `tenant_id`: UUID NOT NULL
+- `recording_url`: VARCHAR(500) NOT NULL -- S3 URL
+- `recording_key`: VARCHAR(500) NOT NULL -- S3 key
+- `duration_seconds`: INTEGER NOT NULL
+- `file_size_bytes`: BIGINT NOT NULL
+- `format`: VARCHAR(20) DEFAULT 'mp3' CHECK (format IN ('mp3', 'wav', 'opus'))
+- `storage_tier`: VARCHAR(50) DEFAULT 'standard' CHECK (storage_tier IN ('standard', 'infrequent_access', 'glacier'))
+- `encryption_key_id`: VARCHAR(255) -- KMS key ID
+- `retention_policy`: VARCHAR(50) NOT NULL -- 'us_7_years', 'uk_6_years', 'default_3_years'
+- `scheduled_deletion`: TIMESTAMP(6) WITH TIME ZONE
+- `transcript_available`: BOOLEAN DEFAULT FALSE
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `accessed_at`: TIMESTAMP(6) WITH TIME ZONE
+- `access_count`: INTEGER DEFAULT 0
+- INDEX idx_recordings_tenant_time (tenant_id, created_at DESC)
+- INDEX idx_recordings_deletion (scheduled_deletion) WHERE scheduled_deletion IS NOT NULL
+
+#### Table: inter_agent_communications
+- `id`: UUID (PK)
+- `from_agent_id`: UUID NOT NULL
+- `to_agent_id`: UUID NOT NULL
+- `tenant_id`: UUID NOT NULL
+- `communication_type`: VARCHAR(50) CHECK (communication_type IN ('transfer', 'collaboration', 'escalation'))
+- `context_packet`: JSONB NOT NULL -- Conversation history, entities, intent
+- `status`: VARCHAR(50) CHECK (status IN ('initiated', 'accepted', 'completed', 'failed'))
+- `initiated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `completed_at`: TIMESTAMP(6) WITH TIME ZONE
+- `metadata`: JSONB DEFAULT '{}'
+
 ### Schema: security (Enhanced)
 
 #### Table: api_keys
@@ -564,6 +739,27 @@
 - `last_used_at`: TIMESTAMP(6) WITH TIME ZONE
 - `usage_count`: INTEGER DEFAULT 0
 - `version`: INTEGER DEFAULT 1
+
+#### Table: customer_credentials (NEW - KMS Encrypted)
+- `id`: UUID (PK)
+- `tenant_id`: UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE
+- `credential_type`: VARCHAR(100) NOT NULL -- 'api_key', 'oauth_token', 'database', 'mcp_connector'
+- `credential_name`: VARCHAR(255) NOT NULL
+- `encrypted_data`: TEXT NOT NULL -- Base64 encoded encrypted credential
+- `data_key_encrypted`: TEXT NOT NULL -- KMS encrypted data key
+- `encryption_context`: JSONB NOT NULL -- Additional AAD for decryption
+- `kms_key_alias`: VARCHAR(255) NOT NULL -- Tenant-specific KMS key
+- `metadata`: JSONB DEFAULT '{}' -- Non-sensitive metadata
+- `status`: VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'expired', 'rotating'))
+- `expires_at`: TIMESTAMP(6) WITH TIME ZONE
+- `last_rotated_at`: TIMESTAMP(6) WITH TIME ZONE
+- `last_accessed_at`: TIMESTAMP(6) WITH TIME ZONE
+- `access_count`: INTEGER DEFAULT 0
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `created_by_id`: UUID NOT NULL REFERENCES users(id)
+- INDEX idx_credentials_tenant_type (tenant_id, credential_type, status)
+- INDEX idx_credentials_expires (expires_at) WHERE expires_at IS NOT NULL
 
 #### Table: audit_logs (TimescaleDB Hypertable)
 - `id`: UUID (PK)
@@ -902,4 +1098,771 @@ CREATE POLICY org_isolation_users ON users
     USING (organization_id = current_setting('app.current_organization_id')::UUID);
 ```
 
-This updated database schema reflects the current AYBIZA platform with hybrid Cloudflare+AWS architecture, enhanced phone number management, latest PostgreSQL 16.9 features, TimescaleDB 2.20.0 capabilities, and comprehensive security and compliance requirements.
+## Billion-Scale Architecture with Citus
+
+### Citus Distributed Tables Configuration
+```sql
+-- Distribute primary tables by tenant_id for horizontal scaling
+SELECT create_distributed_table('tenants', 'id');
+SELECT create_distributed_table('users', 'tenant_id');
+SELECT create_distributed_table('agents', 'tenant_id');
+SELECT create_distributed_table('agent_configurations', 'tenant_id');
+SELECT create_distributed_table('phone_numbers', 'tenant_id');
+SELECT create_distributed_table('calls', 'tenant_id');
+SELECT create_distributed_table('call_transcripts', 'tenant_id');
+SELECT create_distributed_table('workflows', 'tenant_id');
+SELECT create_distributed_table('tools', 'tenant_id');
+SELECT create_distributed_table('consent_records', 'tenant_id');
+
+-- Co-locate related tables for efficient joins
+SELECT create_distributed_table('agent_versions', 'tenant_id', colocate_with => 'agents');
+SELECT create_distributed_table('conversation_nodes', 'tenant_id', colocate_with => 'agents');
+SELECT create_distributed_table('workflow_versions', 'tenant_id', colocate_with => 'workflows');
+SELECT create_distributed_table('workflow_nodes', 'tenant_id', colocate_with => 'workflows');
+
+-- Reference tables (replicated to all nodes)
+SELECT create_reference_table('organizations');
+SELECT create_reference_table('roles');
+```
+
+### DynamoDB Tables for Hot Data
+```yaml
+AgentSessions:
+  PartitionKey: agent_session_id
+  SortKey: timestamp
+  GlobalSecondaryIndexes:
+    - Name: TenantAgentIndex
+      PartitionKey: tenant_id
+      SortKey: agent_id
+  BillingMode: ON_DEMAND
+  StreamEnabled: true
+  TTL:
+    AttributeName: ttl
+    Enabled: true
+
+ActiveToolExecutions:
+  PartitionKey: agent_id
+  SortKey: execution_id
+  GlobalSecondaryIndexes:
+    - Name: TenantToolIndex
+      PartitionKey: tenant_id
+      SortKey: timestamp
+  BillingMode: ON_DEMAND
+  StreamEnabled: true
+
+RealtimeCallState:
+  PartitionKey: call_sid
+  SortKey: timestamp
+  BillingMode: ON_DEMAND
+  TTL:
+    AttributeName: ttl
+    Enabled: true
+```
+
+### Vector Database Schema (Pinecone/Weaviate)
+```json
+{
+  "class": "AgentMemory",
+  "description": "Long-term memory storage for agents",
+  "vectorIndexType": "hnsw",
+  "vectorizer": "text2vec-openai",
+  "properties": [
+    {
+      "name": "content",
+      "dataType": ["text"],
+      "description": "The memory content"
+    },
+    {
+      "name": "agentId",
+      "dataType": ["string"],
+      "description": "Agent UUID"
+    },
+    {
+      "name": "tenantId",
+      "dataType": ["string"],
+      "description": "Tenant UUID for isolation"
+    },
+    {
+      "name": "memoryType",
+      "dataType": ["string"],
+      "description": "Type of memory: fact, preference, context, skill"
+    },
+    {
+      "name": "importanceScore",
+      "dataType": ["number"],
+      "description": "Relevance score 0-1"
+    },
+    {
+      "name": "metadata",
+      "dataType": ["object"],
+      "description": "Additional context"
+    }
+  ]
+}
+```
+
+### Data Distribution Strategy
+
+#### Sharding Key Selection
+- **Primary shard key**: `tenant_id` (ensures data locality)
+- **Secondary considerations**: Geographic distribution
+- **Shard count**: 128 initial shards (allows 100M+ tenants)
+
+#### Cross-Database Query Patterns
+```elixir
+defmodule Aybiza.Database.BillionScale do
+  @doc """
+  Fetch agent state from hybrid storage
+  """
+  def get_agent_state(agent_id, tenant_id) do
+    # 1. Check DynamoDB for hot state
+    case DynamoDB.get_item("AgentSessions", %{agent_session_id: agent_id}) do
+      {:ok, session} when not is_nil(session) ->
+        {:ok, :hot, session}
+      
+      _ ->
+        # 2. Fall back to PostgreSQL
+        case Repo.get_by(AgentConfiguration, agent_id: agent_id, tenant_id: tenant_id) do
+          nil -> {:error, :not_found}
+          config -> {:ok, :cold, config}
+        end
+    end
+  end
+
+  @doc """
+  Store tool execution across databases
+  """
+  def record_tool_execution(execution_data) do
+    # 1. Write to DynamoDB for real-time access
+    DynamoDB.put_item("ActiveToolExecutions", execution_data)
+    
+    # 2. Write to TimescaleDB for analytics
+    %ToolExecution{}
+    |> ToolExecution.changeset(execution_data)
+    |> Repo.insert()
+    
+    # 3. Update cost metrics
+    update_usage_metrics(execution_data)
+  end
+end
+```
+
+### Cost Optimization at Scale
+
+#### Storage Tiering Strategy
+1. **Hot (0-7 days)**: DynamoDB + S3 Standard
+2. **Warm (7-90 days)**: PostgreSQL + S3 IA
+3. **Cold (90+ days)**: Compressed PostgreSQL + S3 Glacier
+4. **Archive (1+ year)**: S3 Glacier Deep Archive
+
+#### Query Optimization
+```sql
+-- Partial indexes for common queries
+CREATE INDEX CONCURRENTLY idx_active_agents ON agents(tenant_id, status) 
+  WHERE status = 'active';
+
+CREATE INDEX CONCURRENTLY idx_recent_calls ON calls(tenant_id, start_time) 
+  WHERE start_time > NOW() - INTERVAL '7 days';
+
+-- Materialized views for expensive aggregations
+CREATE MATERIALIZED VIEW tenant_usage_daily AS
+SELECT 
+  tenant_id,
+  DATE(start_time) as usage_date,
+  COUNT(*) as total_calls,
+  SUM(duration_seconds) as total_duration,
+  SUM(cost_usd) as total_cost,
+  COUNT(DISTINCT agent_id) as active_agents
+FROM calls
+WHERE start_time > NOW() - INTERVAL '30 days'
+GROUP BY tenant_id, DATE(start_time);
+
+CREATE UNIQUE INDEX ON tenant_usage_daily(tenant_id, usage_date);
+```
+
+### Security at Scale
+
+#### Customer Credential Storage (AWS KMS)
+```elixir
+defmodule Aybiza.Security.CredentialVault do
+  @kms_client ExAws.KMS
+  
+  def store_customer_credential(tenant_id, credential_type, credential_data) do
+    # Generate tenant-specific data key
+    {:ok, %{ciphertext_blob: data_key_encrypted, plaintext: data_key}} = 
+      @kms_client.generate_data_key(
+        key_id: "alias/aybiza-tenant-#{tenant_id}",
+        key_spec: "AES_256"
+      )
+      |> ExAws.request()
+    
+    # Encrypt credential with data key
+    encrypted_credential = :crypto.crypto_one_time(
+      :aes_256_gcm, 
+      data_key, 
+      generate_iv(), 
+      credential_data, 
+      true
+    )
+    
+    # Store in database
+    %CustomerCredential{
+      tenant_id: tenant_id,
+      credential_type: credential_type,
+      encrypted_data: Base.encode64(encrypted_credential),
+      data_key_encrypted: Base.encode64(data_key_encrypted),
+      encryption_context: %{
+        "tenant_id" => tenant_id,
+        "timestamp" => DateTime.utc_now()
+      }
+    }
+    |> Repo.insert()
+  end
+end
+```
+
+### Schema: billing
+
+#### Table: billing_accounts
+- `id`: UUID (PK)
+- `organization_id`: UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
+- `account_number`: VARCHAR(20) UNIQUE NOT NULL -- Format: BILL-XXXX-XXXX
+- `billing_type`: VARCHAR(50) DEFAULT 'postpaid' CHECK (billing_type IN ('prepaid', 'postpaid', 'enterprise_contract'))
+- `payment_terms`: VARCHAR(50) DEFAULT 'net_30' CHECK (payment_terms IN ('due_on_receipt', 'net_15', 'net_30', 'net_60', 'custom'))
+- `credit_limit`: DECIMAL(10,2) DEFAULT 10000.00
+- `current_balance`: DECIMAL(10,2) DEFAULT 0.00
+- `auto_recharge_enabled`: BOOLEAN DEFAULT FALSE
+- `auto_recharge_amount`: DECIMAL(10,2)
+- `auto_recharge_threshold`: DECIMAL(10,2)
+- `billing_contact`: JSONB NOT NULL -- Name, email, phone
+- `billing_address`: JSONB NOT NULL
+- `tax_exempt`: BOOLEAN DEFAULT FALSE
+- `tax_exempt_certificate`: TEXT -- Encrypted
+- `currency`: VARCHAR(3) DEFAULT 'USD'
+- `status`: VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'delinquent', 'closed'))
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+
+#### Table: payment_methods
+- `id`: UUID (PK)
+- `billing_account_id`: UUID NOT NULL REFERENCES billing_accounts(id) ON DELETE CASCADE
+- `type`: VARCHAR(50) NOT NULL CHECK (type IN ('credit_card', 'ach', 'wire_transfer', 'invoice'))
+- `is_primary`: BOOLEAN DEFAULT FALSE
+- `last_four`: VARCHAR(4) -- Last 4 digits of card/account
+- `brand`: VARCHAR(50) -- Visa, Mastercard, etc.
+- `expiry_month`: INTEGER
+- `expiry_year`: INTEGER
+- `bank_name`: VARCHAR(100)
+- `account_holder_name`: VARCHAR(255) -- Encrypted
+- `billing_address`: JSONB
+- `stripe_payment_method_id`: VARCHAR(255) -- External provider reference
+- `status`: VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'expired', 'failed', 'removed'))
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+
+#### Table: usage_metering (TimescaleDB Hypertable)
+- `id`: UUID (PK)
+- `timestamp`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `organization_id`: UUID NOT NULL
+- `tenant_id`: UUID NOT NULL
+- `resource_type`: VARCHAR(100) NOT NULL -- 'call_minutes', 'agent_sessions', 'api_calls', 'storage_gb', 'tool_executions'
+- `resource_subtype`: VARCHAR(100) -- 'inbound', 'outbound', 'claude_opus', 'claude_sonnet'
+- `quantity`: DECIMAL(20,6) NOT NULL
+- `unit`: VARCHAR(50) NOT NULL -- 'minutes', 'sessions', 'calls', 'gb', 'executions'
+- `unit_price`: DECIMAL(10,6) NOT NULL
+- `total_cost`: DECIMAL(10,6) NOT NULL
+- `metadata`: JSONB DEFAULT '{}'
+- `billing_period`: DATE NOT NULL
+- `invoice_id`: UUID REFERENCES invoices(id)
+
+#### Table: invoices
+- `id`: UUID (PK)
+- `invoice_number`: VARCHAR(50) UNIQUE NOT NULL -- Format: INV-YYYY-MM-XXXXXX
+- `billing_account_id`: UUID NOT NULL REFERENCES billing_accounts(id)
+- `organization_id`: UUID NOT NULL REFERENCES organizations(id)
+- `billing_period_start`: DATE NOT NULL
+- `billing_period_end`: DATE NOT NULL
+- `status`: VARCHAR(50) DEFAULT 'draft' CHECK (status IN ('draft', 'pending', 'sent', 'paid', 'overdue', 'cancelled', 'refunded'))
+- `subtotal`: DECIMAL(10,2) NOT NULL
+- `tax_amount`: DECIMAL(10,2) DEFAULT 0.00
+- `discount_amount`: DECIMAL(10,2) DEFAULT 0.00
+- `total_amount`: DECIMAL(10,2) NOT NULL
+- `currency`: VARCHAR(3) DEFAULT 'USD'
+- `due_date`: DATE NOT NULL
+- `paid_date`: DATE
+- `payment_method_id`: UUID REFERENCES payment_methods(id)
+- `stripe_invoice_id`: VARCHAR(255)
+- `pdf_url`: VARCHAR(500) -- S3 URL
+- `notes`: TEXT
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `sent_at`: TIMESTAMP(6) WITH TIME ZONE
+- `metadata`: JSONB DEFAULT '{}'
+
+### Schema: identity (Enhanced SSO & Sessions)
+
+#### Table: sso_configurations
+- `id`: UUID (PK)
+- `organization_id`: UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
+- `provider`: VARCHAR(50) NOT NULL CHECK (provider IN ('saml', 'oidc', 'azure_ad', 'okta', 'google_workspace', 'custom'))
+- `enabled`: BOOLEAN DEFAULT TRUE
+- `idp_entity_id`: VARCHAR(500) NOT NULL
+- `sso_url`: VARCHAR(500) NOT NULL
+- `certificate`: TEXT -- X.509 certificate for SAML
+- `client_id`: VARCHAR(255) -- For OIDC
+- `client_secret`: TEXT -- Encrypted, for OIDC
+- `metadata_url`: VARCHAR(500)
+- `attribute_mapping`: JSONB NOT NULL DEFAULT '{}'
+- `default_role_id`: UUID REFERENCES roles(id)
+- `auto_provision_users`: BOOLEAN DEFAULT TRUE
+- `jit_provisioning`: BOOLEAN DEFAULT TRUE
+- `status`: VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'testing'))
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+
+#### Table: user_sessions
+- `id`: UUID (PK)
+- `user_id`: UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+- `session_token`: VARCHAR(255) UNIQUE NOT NULL -- Hashed
+- `refresh_token`: VARCHAR(255) UNIQUE -- Hashed
+- `ip_address`: INET NOT NULL
+- `user_agent`: TEXT
+- `device_fingerprint`: VARCHAR(255)
+- `location`: JSONB -- GeoIP data
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `expires_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL
+- `last_activity`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `revoked_at`: TIMESTAMP(6) WITH TIME ZONE
+- `revoked_reason`: VARCHAR(100)
+
+#### Table: login_history (TimescaleDB Hypertable)
+- `id`: UUID (PK)
+- `timestamp`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `user_id`: UUID NOT NULL REFERENCES users(id)
+- `success`: BOOLEAN NOT NULL
+- `failure_reason`: VARCHAR(100) -- 'invalid_password', 'account_locked', 'mfa_failed'
+- `ip_address`: INET NOT NULL
+- `user_agent`: TEXT
+- `device_fingerprint`: VARCHAR(255)
+- `location`: JSONB
+- `authentication_method`: VARCHAR(50) -- 'password', 'sso', 'api_key', 'mfa'
+- `risk_score`: DECIMAL(3,2)
+- `suspicious_indicators`: JSONB DEFAULT '[]'
+
+### Schema: compliance (Enhanced KYC & Business Verification)
+
+#### Table: kyc_verifications
+- `id`: UUID (PK)
+- `organization_id`: UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
+- `verification_type`: VARCHAR(50) NOT NULL CHECK (verification_type IN ('business', 'individual', 'enhanced'))
+- `status`: VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'in_review', 'approved', 'rejected', 'expired'))
+- `risk_level`: VARCHAR(20) CHECK (risk_level IN ('low', 'medium', 'high', 'unacceptable'))
+- `submitted_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `reviewed_at`: TIMESTAMP(6) WITH TIME ZONE
+- `reviewed_by`: VARCHAR(255) -- Can be system or human reviewer
+- `expiry_date`: DATE
+- `rejection_reasons`: JSONB DEFAULT '[]'
+- `verification_data`: JSONB NOT NULL -- Encrypted sensitive data
+- `provider`: VARCHAR(50) -- 'jumio', 'onfido', 'trulioo', 'manual'
+- `provider_reference`: VARCHAR(255)
+- `documents`: JSONB DEFAULT '[]' -- Array of document references
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+
+#### Table: compliance_documents
+- `id`: UUID (PK)
+- `organization_id`: UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
+- `document_type`: VARCHAR(100) NOT NULL -- 'business_license', 'tax_certificate', 'incorporation', 'bank_statement'
+- `document_name`: VARCHAR(255) NOT NULL
+- `file_key`: VARCHAR(500) NOT NULL -- S3 key
+- `file_hash`: VARCHAR(64) NOT NULL -- SHA-256
+- `mime_type`: VARCHAR(100) NOT NULL
+- `file_size_bytes`: BIGINT NOT NULL
+- `status`: VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'verified', 'rejected', 'expired'))
+- `expiry_date`: DATE
+- `verified_at`: TIMESTAMP(6) WITH TIME ZONE
+- `verified_by`: UUID REFERENCES users(id)
+- `metadata`: JSONB DEFAULT '{}'
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+
+#### Table: sanctions_screening
+- `id`: UUID (PK)
+- `organization_id`: UUID NOT NULL REFERENCES organizations(id)
+- `screening_type`: VARCHAR(50) NOT NULL CHECK (screening_type IN ('pep', 'sanctions', 'adverse_media', 'watchlist'))
+- `status`: VARCHAR(50) NOT NULL CHECK (status IN ('clear', 'potential_match', 'confirmed_match', 'false_positive'))
+- `provider`: VARCHAR(50) NOT NULL -- 'dow_jones', 'refinitiv', 'complyadvantage'
+- `provider_reference`: VARCHAR(255)
+- `matches`: JSONB DEFAULT '[]'
+- `risk_score`: DECIMAL(3,2)
+- `screened_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `reviewed_at`: TIMESTAMP(6) WITH TIME ZONE
+- `reviewed_by`: UUID REFERENCES users(id)
+- `review_notes`: TEXT
+- `next_screening_date`: DATE
+
+### Schema: quality (Call Quality & Analytics)
+
+#### Table: call_quality_scores
+- `id`: UUID (PK)
+- `call_id`: UUID NOT NULL REFERENCES calls(id) ON DELETE CASCADE
+- `tenant_id`: UUID NOT NULL
+- `agent_id`: UUID NOT NULL
+- `overall_score`: DECIMAL(3,2) NOT NULL -- 0.00 to 1.00
+- `audio_quality_score`: DECIMAL(3,2)
+- `agent_performance_score`: DECIMAL(3,2)
+- `customer_satisfaction_score`: DECIMAL(3,2)
+- `compliance_score`: DECIMAL(3,2)
+- `scoring_method`: VARCHAR(50) DEFAULT 'ai' CHECK (scoring_method IN ('ai', 'manual', 'hybrid'))
+- `scoring_model_version`: VARCHAR(50)
+- `issues_detected`: JSONB DEFAULT '[]'
+- `highlights`: JSONB DEFAULT '[]'
+- `recommendations`: JSONB DEFAULT '[]'
+- `scored_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `reviewed_by`: UUID REFERENCES users(id)
+- `reviewed_at`: TIMESTAMP(6) WITH TIME ZONE
+- `review_notes`: TEXT
+
+#### Table: agent_performance_metrics (TimescaleDB Hypertable)
+- `id`: UUID (PK)
+- `timestamp`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `agent_id`: UUID NOT NULL REFERENCES agents(id)
+- `tenant_id`: UUID NOT NULL
+- `metric_date`: DATE NOT NULL
+- `total_calls`: INTEGER DEFAULT 0
+- `successful_calls`: INTEGER DEFAULT 0
+- `average_call_duration`: DECIMAL(10,2)
+- `average_response_time_ms`: DECIMAL(10,2)
+- `customer_satisfaction_avg`: DECIMAL(3,2)
+- `first_call_resolution_rate`: DECIMAL(5,2)
+- `tool_usage_stats`: JSONB DEFAULT '{}'
+- `error_rate`: DECIMAL(5,2)
+- `escalation_rate`: DECIMAL(5,2)
+- `compliance_violations`: INTEGER DEFAULT 0
+- UNIQUE (agent_id, metric_date)
+
+#### Table: customer_feedback
+- `id`: UUID (PK)
+- `call_id`: UUID NOT NULL REFERENCES calls(id)
+- `tenant_id`: UUID NOT NULL
+- `feedback_type`: VARCHAR(50) NOT NULL CHECK (feedback_type IN ('survey', 'rating', 'comment', 'complaint'))
+- `rating`: INTEGER CHECK (rating >= 1 AND rating <= 5)
+- `nps_score`: INTEGER CHECK (nps_score >= 0 AND nps_score <= 10)
+- `comment`: TEXT
+- `categories`: JSONB DEFAULT '[]' -- ['helpful', 'fast', 'accurate', 'friendly']
+- `sentiment`: VARCHAR(20) CHECK (sentiment IN ('positive', 'neutral', 'negative'))
+- `collected_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `collection_method`: VARCHAR(50) -- 'post_call_ivr', 'sms', 'email', 'in_call'
+- `metadata`: JSONB DEFAULT '{}'
+
+### Schema: features (Feature Management & Configuration)
+
+#### Table: feature_flags
+- `id`: UUID (PK)
+- `name`: VARCHAR(100) UNIQUE NOT NULL
+- `description`: TEXT
+- `flag_type`: VARCHAR(50) DEFAULT 'release' CHECK (flag_type IN ('release', 'experiment', 'operational', 'permission'))
+- `default_enabled`: BOOLEAN DEFAULT FALSE
+- `rollout_percentage`: DECIMAL(5,2) DEFAULT 0.00
+- `targeting_rules`: JSONB DEFAULT '{}'
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `created_by`: UUID REFERENCES users(id)
+
+#### Table: tenant_feature_overrides
+- `id`: UUID (PK)
+- `tenant_id`: UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE
+- `feature_flag_id`: UUID NOT NULL REFERENCES feature_flags(id)
+- `enabled`: BOOLEAN NOT NULL
+- `configuration`: JSONB DEFAULT '{}'
+- `reason`: TEXT
+- `expires_at`: TIMESTAMP(6) WITH TIME ZONE
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `created_by`: UUID REFERENCES users(id)
+- UNIQUE (tenant_id, feature_flag_id)
+
+#### Table: white_label_configurations
+- `id`: UUID (PK)
+- `organization_id`: UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
+- `brand_name`: VARCHAR(255) NOT NULL
+- `logo_url`: VARCHAR(500)
+- `favicon_url`: VARCHAR(500)
+- `primary_color`: VARCHAR(7) -- Hex color
+- `secondary_color`: VARCHAR(7)
+- `custom_domain`: VARCHAR(255) UNIQUE
+- `ssl_certificate_id`: VARCHAR(255) -- AWS ACM certificate
+- `email_from_name`: VARCHAR(255)
+- `email_from_address`: VARCHAR(255)
+- `support_email`: VARCHAR(255)
+- `support_phone`: VARCHAR(20)
+- `custom_css`: TEXT
+- `custom_js`: TEXT
+- `metadata`: JSONB DEFAULT '{}'
+- `status`: VARCHAR(50) DEFAULT 'active'
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+
+### Schema: operations (Operational Excellence)
+
+#### Table: scheduled_maintenance
+- `id`: UUID (PK)
+- `title`: VARCHAR(255) NOT NULL
+- `description`: TEXT
+- `maintenance_type`: VARCHAR(50) NOT NULL CHECK (maintenance_type IN ('planned', 'emergency', 'security_patch'))
+- `affected_services`: JSONB NOT NULL DEFAULT '[]'
+- `affected_regions`: JSONB NOT NULL DEFAULT '[]'
+- `affected_tenants`: JSONB DEFAULT '[]' -- Empty means all tenants
+- `start_time`: TIMESTAMP(6) WITH TIME ZONE NOT NULL
+- `end_time`: TIMESTAMP(6) WITH TIME ZONE NOT NULL
+- `status`: VARCHAR(50) DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'in_progress', 'completed', 'cancelled'))
+- `notification_sent`: BOOLEAN DEFAULT FALSE
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `created_by`: UUID REFERENCES users(id)
+- `completed_at`: TIMESTAMP(6) WITH TIME ZONE
+- `impact_summary`: TEXT
+
+#### Table: rate_limit_configurations
+- `id`: UUID (PK)
+- `scope`: VARCHAR(50) NOT NULL CHECK (scope IN ('global', 'organization', 'tenant', 'user'))
+- `scope_id`: UUID -- NULL for global
+- `resource`: VARCHAR(100) NOT NULL -- 'api_calls', 'concurrent_calls', 'tool_executions'
+- `limit_value`: INTEGER NOT NULL
+- `time_window_seconds`: INTEGER NOT NULL
+- `burst_allowed`: BOOLEAN DEFAULT TRUE
+- `burst_multiplier`: DECIMAL(3,2) DEFAULT 1.5
+- `enforcement_action`: VARCHAR(50) DEFAULT 'throttle' CHECK (enforcement_action IN ('throttle', 'reject', 'queue'))
+- `alert_threshold_percentage`: DECIMAL(5,2) DEFAULT 80.00
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+
+#### Table: sla_tracking
+- `id`: UUID (PK)
+- `tenant_id`: UUID NOT NULL REFERENCES tenants(id)
+- `month`: DATE NOT NULL
+- `uptime_percentage`: DECIMAL(5,2) NOT NULL
+- `api_availability_percentage`: DECIMAL(5,2) NOT NULL
+- `voice_quality_percentage`: DECIMAL(5,2) NOT NULL
+- `support_response_time_avg_minutes`: INTEGER
+- `incidents_count`: INTEGER DEFAULT 0
+- `sla_breaches`: JSONB DEFAULT '[]'
+- `credits_issued`: DECIMAL(10,2) DEFAULT 0.00
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- UNIQUE (tenant_id, month)
+
+### Schema: partners (Partner & Reseller Ecosystem)
+
+#### Table: partners
+- `id`: UUID (PK)
+- `partner_code`: VARCHAR(20) UNIQUE NOT NULL -- Format: PTR-XXXX-XXXX
+- `company_name`: VARCHAR(255) NOT NULL
+- `partner_type`: VARCHAR(50) NOT NULL CHECK (partner_type IN ('reseller', 'referral', 'technology', 'integration'))
+- `tier`: VARCHAR(50) DEFAULT 'bronze' CHECK (tier IN ('bronze', 'silver', 'gold', 'platinum'))
+- `commission_rate`: DECIMAL(5,2) DEFAULT 20.00
+- `discount_rate`: DECIMAL(5,2) DEFAULT 0.00
+- `billing_model`: VARCHAR(50) DEFAULT 'revenue_share' CHECK (billing_model IN ('revenue_share', 'fixed_fee', 'tiered', 'custom'))
+- `contract_start`: DATE NOT NULL
+- `contract_end`: DATE
+- `status`: VARCHAR(50) DEFAULT 'active' CHECK (status IN ('pending', 'active', 'suspended', 'terminated'))
+- `primary_contact`: JSONB NOT NULL
+- `technical_contact`: JSONB
+- `billing_contact`: JSONB
+- `api_access_enabled`: BOOLEAN DEFAULT TRUE
+- `white_label_enabled`: BOOLEAN DEFAULT FALSE
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+
+#### Table: partner_organizations
+- `id`: UUID (PK)
+- `partner_id`: UUID NOT NULL REFERENCES partners(id)
+- `organization_id`: UUID NOT NULL REFERENCES organizations(id)
+- `relationship_type`: VARCHAR(50) DEFAULT 'managed' CHECK (relationship_type IN ('managed', 'referred', 'supported'))
+- `commission_override`: DECIMAL(5,2) -- Override partner default
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `metadata`: JSONB DEFAULT '{}'
+- UNIQUE (partner_id, organization_id)
+
+### Schema: security (Enhanced Threat Intelligence)
+
+#### Table: threat_intelligence
+- `id`: UUID (PK)
+- `threat_type`: VARCHAR(100) NOT NULL -- 'voice_cloning', 'number_spoofing', 'prompt_injection'
+- `threat_signature`: TEXT NOT NULL
+- `severity`: VARCHAR(20) NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical'))
+- `detection_method`: VARCHAR(100) NOT NULL
+- `active`: BOOLEAN DEFAULT TRUE
+- `false_positive_rate`: DECIMAL(5,2)
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `source`: VARCHAR(100) -- 'internal', 'vendor', 'community'
+- `metadata`: JSONB DEFAULT '{}'
+
+#### Table: security_policies
+- `id`: UUID (PK)
+- `organization_id`: UUID REFERENCES organizations(id) -- NULL for global policies
+- `tenant_id`: UUID REFERENCES tenants(id) -- NULL for org-wide policies
+- `policy_type`: VARCHAR(100) NOT NULL -- 'password', 'mfa', 'api_access', 'data_retention'
+- `policy_name`: VARCHAR(255) NOT NULL
+- `requirements`: JSONB NOT NULL
+- `enforcement_level`: VARCHAR(50) DEFAULT 'required' CHECK (enforcement_level IN ('optional', 'recommended', 'required', 'strict'))
+- `grace_period_days`: INTEGER DEFAULT 0
+- `exceptions`: JSONB DEFAULT '[]'
+- `active`: BOOLEAN DEFAULT TRUE
+- `created_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `updated_at`: TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT NOW()
+- `created_by`: UUID REFERENCES users(id)
+
+## Additional Indexes for Enterprise Tables
+
+### Billing & Financial Indexes
+```sql
+-- Billing Accounts
+CREATE INDEX CONCURRENTLY idx_billing_accounts_org ON billing_accounts(organization_id, status);
+CREATE INDEX CONCURRENTLY idx_billing_accounts_balance ON billing_accounts(current_balance, credit_limit);
+
+-- Payment Methods
+CREATE INDEX CONCURRENTLY idx_payment_methods_account ON payment_methods(billing_account_id, is_primary);
+CREATE INDEX CONCURRENTLY idx_payment_methods_expiry ON payment_methods(expiry_year, expiry_month, status);
+
+-- Usage Metering (TimescaleDB optimized)
+CREATE INDEX CONCURRENTLY idx_usage_metering_tenant_time ON usage_metering(tenant_id, timestamp DESC);
+CREATE INDEX CONCURRENTLY idx_usage_metering_resource ON usage_metering(resource_type, resource_subtype, timestamp DESC);
+CREATE INDEX CONCURRENTLY idx_usage_metering_billing ON usage_metering(billing_period, invoice_id);
+
+-- Invoices
+CREATE INDEX CONCURRENTLY idx_invoices_org_period ON invoices(organization_id, billing_period_start DESC);
+CREATE INDEX CONCURRENTLY idx_invoices_status_due ON invoices(status, due_date) WHERE status IN ('pending', 'sent', 'overdue');
+```
+
+### Identity & Security Indexes
+```sql
+-- SSO Configurations
+CREATE INDEX CONCURRENTLY idx_sso_configs_org ON sso_configurations(organization_id, enabled);
+
+-- User Sessions
+CREATE INDEX CONCURRENTLY idx_user_sessions_user ON user_sessions(user_id, expires_at);
+CREATE INDEX CONCURRENTLY idx_user_sessions_activity ON user_sessions(last_activity) WHERE revoked_at IS NULL;
+
+-- Login History (TimescaleDB optimized)
+CREATE INDEX CONCURRENTLY idx_login_history_user_time ON login_history(user_id, timestamp DESC);
+CREATE INDEX CONCURRENTLY idx_login_history_failures ON login_history(timestamp DESC) WHERE success = FALSE;
+CREATE INDEX CONCURRENTLY idx_login_history_risk ON login_history(risk_score DESC, timestamp DESC) WHERE risk_score > 0.7;
+```
+
+### Quality & Analytics Indexes
+```sql
+-- Call Quality Scores
+CREATE INDEX CONCURRENTLY idx_quality_scores_call ON call_quality_scores(call_id);
+CREATE INDEX CONCURRENTLY idx_quality_scores_agent ON call_quality_scores(agent_id, scored_at DESC);
+CREATE INDEX CONCURRENTLY idx_quality_scores_low ON call_quality_scores(overall_score, scored_at DESC) WHERE overall_score < 0.7;
+
+-- Agent Performance Metrics (TimescaleDB optimized)
+CREATE INDEX CONCURRENTLY idx_agent_metrics_time ON agent_performance_metrics(agent_id, timestamp DESC);
+CREATE INDEX CONCURRENTLY idx_agent_metrics_date ON agent_performance_metrics(agent_id, metric_date DESC);
+
+-- Customer Feedback
+CREATE INDEX CONCURRENTLY idx_feedback_call ON customer_feedback(call_id);
+CREATE INDEX CONCURRENTLY idx_feedback_sentiment ON customer_feedback(sentiment, collected_at DESC);
+CREATE INDEX CONCURRENTLY idx_feedback_nps ON customer_feedback(nps_score, collected_at DESC) WHERE nps_score IS NOT NULL;
+```
+
+### Feature Management Indexes
+```sql
+-- Feature Flags
+CREATE INDEX CONCURRENTLY idx_feature_flags_type ON feature_flags(flag_type, default_enabled);
+
+-- Tenant Feature Overrides
+CREATE INDEX CONCURRENTLY idx_feature_overrides_tenant ON tenant_feature_overrides(tenant_id);
+CREATE INDEX CONCURRENTLY idx_feature_overrides_expires ON tenant_feature_overrides(expires_at) WHERE expires_at IS NOT NULL;
+```
+
+### Partner Management Indexes
+```sql
+-- Partners
+CREATE INDEX CONCURRENTLY idx_partners_type_status ON partners(partner_type, status);
+CREATE INDEX CONCURRENTLY idx_partners_tier ON partners(tier, status) WHERE status = 'active';
+
+-- Partner Organizations
+CREATE INDEX CONCURRENTLY idx_partner_orgs_partner ON partner_organizations(partner_id);
+CREATE INDEX CONCURRENTLY idx_partner_orgs_org ON partner_organizations(organization_id);
+```
+
+## TimescaleDB Configuration for New Tables
+
+### New Hypertables
+```sql
+-- Create hypertables for time-series data
+SELECT create_hypertable('usage_metering', 'timestamp', chunk_time_interval => INTERVAL '1 day');
+SELECT create_hypertable('login_history', 'timestamp', chunk_time_interval => INTERVAL '1 day');
+SELECT create_hypertable('agent_performance_metrics', 'timestamp', chunk_time_interval => INTERVAL '1 day');
+
+-- Add space dimensions for better performance
+SELECT add_dimension('usage_metering', 'tenant_id', number_partitions => 4);
+SELECT add_dimension('login_history', 'user_id', number_partitions => 4);
+SELECT add_dimension('agent_performance_metrics', 'tenant_id', number_partitions => 4);
+```
+
+### Continuous Aggregates for Enterprise Metrics
+```sql
+-- Hourly usage aggregations
+CREATE MATERIALIZED VIEW usage_hourly
+WITH (timescaledb.continuous) AS
+SELECT time_bucket('1 hour', timestamp) AS hour,
+       tenant_id,
+       resource_type,
+       SUM(quantity) AS total_quantity,
+       SUM(total_cost) AS total_cost,
+       COUNT(*) AS transaction_count
+FROM usage_metering
+GROUP BY hour, tenant_id, resource_type;
+
+-- Daily billing aggregations
+CREATE MATERIALIZED VIEW billing_daily
+WITH (timescaledb.continuous) AS
+SELECT time_bucket('1 day', timestamp) AS day,
+       organization_id,
+       SUM(total_cost) AS daily_cost,
+       COUNT(DISTINCT tenant_id) AS active_tenants,
+       COUNT(DISTINCT resource_type) AS resource_types_used
+FROM usage_metering
+GROUP BY day, organization_id;
+```
+
+## Citus Distribution for Enterprise Tables
+```sql
+-- Distribute enterprise tables by appropriate keys
+SELECT create_distributed_table('billing_accounts', 'organization_id');
+SELECT create_distributed_table('payment_methods', 'billing_account_id', colocate_with => 'billing_accounts');
+SELECT create_distributed_table('invoices', 'organization_id');
+SELECT create_distributed_table('kyc_verifications', 'organization_id');
+SELECT create_distributed_table('compliance_documents', 'organization_id');
+SELECT create_distributed_table('sso_configurations', 'organization_id');
+SELECT create_distributed_table('user_sessions', 'user_id', colocate_with => 'users');
+SELECT create_distributed_table('call_quality_scores', 'tenant_id', colocate_with => 'calls');
+SELECT create_distributed_table('customer_feedback', 'tenant_id', colocate_with => 'calls');
+SELECT create_distributed_table('feature_flags', 'id'); -- Reference table candidate
+SELECT create_distributed_table('tenant_feature_overrides', 'tenant_id');
+SELECT create_distributed_table('white_label_configurations', 'organization_id');
+SELECT create_distributed_table('rate_limit_configurations', 'scope_id');
+SELECT create_distributed_table('sla_tracking', 'tenant_id');
+
+-- Reference tables (replicated to all nodes)
+SELECT create_reference_table('partners');
+SELECT create_reference_table('threat_intelligence');
+SELECT create_reference_table('security_policies');
+```
+
+This enhanced database schema now includes:
+- **Billion-scale operations** with Citus horizontal sharding
+- **Claude 4 agent capabilities** including extended thinking, parallel tools, MCP, and Files API
+- **Hybrid storage** with PostgreSQL, DynamoDB, TimescaleDB, and Vector DB
+- **Comprehensive billing** with usage metering and invoicing
+- **Enterprise identity** with SSO and session management
+- **KYC/compliance** for business verification
+- **Quality management** with AI-powered scoring
+- **Feature flags** for controlled rollouts
+- **Partner ecosystem** support
+- **Advanced security** with threat intelligence
+- **Account/User ID system** for easy support verification
+- **Comprehensive consent management** for outbound calls
+- **Secure credential storage** with tenant isolation
+- **Indefinite conversation history** with intelligent tiering
+- **Cost optimization** through caching and data lifecycle management

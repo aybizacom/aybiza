@@ -22,7 +22,7 @@ Twilio Audio Stream → Phoenix WebSocket → Audio Processor →
 ## Technology Stack
 
 ### Core Components
-- **Elixir**: 1.18.3+ with OTP 27.3.4+
+- **Elixir**: 1.18.3+ with OTP 28.0+
 - **Phoenix**: 1.7.21+ with Channels for WebSocket
 - **Membrane Framework**: 1.2.3+ for media processing
 - **Audio Format**: μ-law (8kHz, mono) - no conversion overhead
@@ -76,6 +76,7 @@ defmodule VoicePipeline.AudioProcessor do
     GenServer.start_link(__MODULE__, opts, name: via_tuple(call_id))
   end
 
+  @impl true
   def init(opts) do
     call_id = Keyword.get(opts, :call_id)
     agent_id = Keyword.get(opts, :agent_id)
@@ -137,6 +138,7 @@ defmodule VoicePipeline.AudioProcessor do
   end
 
   # Handle STT result
+  @impl true
   def handle_info({:stt_result, transcript, confidence}, state) do
     start_time = System.monotonic_time(:microsecond)
 
@@ -167,6 +169,7 @@ defmodule VoicePipeline.AudioProcessor do
   end
 
   # Handle TTS audio result
+  @impl true
   def handle_info({:tts_audio, audio_data}, state) do
     # Convert to μ-law format and send to Twilio
     case AudioFrame.encode(audio_data, :mulaw) do

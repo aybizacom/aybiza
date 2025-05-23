@@ -10,9 +10,11 @@ This documentation provides comprehensive guidance for developing, deploying, an
 
 - **[documentation_index.md](documentation_index.md)** - This index document
 - **[initial_prompt.md](initial_prompt.md)** - Project overview and vision with hybrid architecture
-- **[technical_requirements.md](technical_requirements.md)** - Comprehensive technical requirements and specifications
-- **[system_architecture.md](system_architecture.md)** - Hybrid Cloudflare+AWS system architecture
-- **[database_schema.md](database_schema.md)** - Database schema and data models
+- **[technical_requirements.md](technical_requirements.md)** - Comprehensive technical requirements and specifications (🆕 Enhanced with enterprise features)
+- **[system_architecture.md](system_architecture.md)** - Hybrid Cloudflare+AWS system architecture (🆕 Updated with new services)
+- **[database_schema.md](database_schema.md)** - Database schema and data models (🆕 Complete enterprise schema)
+- **[database_schema_claude4_updates.md](database_schema_claude4_updates.md)** - Claude 4 specific schema updates (🆕 Learning system, memory enhancements)
+- **[claude4_platform_build_guide.md](claude4_platform_build_guide.md)** - Complete Claude 4 platform build guide (🆕 16-week implementation roadmap)
 
 ### 📁 integration/ - External Integrations
 **Purpose**: Integration patterns and external service connections
@@ -25,6 +27,7 @@ This documentation provides comprehensive guidance for developing, deploying, an
 - **[twilio_integration_best_practices.md](twilio_integration_best_practices.md)** - Twilio integration best practices
 - **[aws_knowledge_base_integration.md](aws_knowledge_base_integration.md)** - AWS Knowledge Base integration
 - **[cloudflare_aws_hybrid_architecture.md](cloudflare_aws_hybrid_architecture.md)** - Cloudflare + AWS hybrid integration
+- **[s3_file_management_system.md](s3_file_management_system.md)** - S3-based file management with future Bedrock readiness (🆕)
 
 ### 📁 architecture/ - System Architecture
 **Purpose**: Detailed architecture patterns and component design
@@ -38,11 +41,19 @@ This documentation provides comprehensive guidance for developing, deploying, an
 - **[transfer_handler.md](transfer_handler.md)** - Call transfer and routing mechanisms
 - **[membrane_framework_integration_guide.md](membrane_framework_integration_guide.md)** - Membrane Framework integration patterns
 - **[multi_tenant_isolation_patterns.md](multi_tenant_isolation_patterns.md)** - Multi-tenant architecture patterns
+- **[claude4_voice_agent_implementation.md](claude4_voice_agent_implementation.md)** - Claude 4 voice agent core implementation (🆕)
+- **[http_webhook_tool_registry.md](http_webhook_tool_registry.md)** - HTTP/webhook tool registry for SaaS integrations (🆕)
+- **[agent_memory_architecture.md](agent_memory_architecture.md)** - Dual-layer memory system with learning (🆕)
+- **[claude4_parallel_tool_execution.md](claude4_parallel_tool_execution.md)** - Parallel tool execution optimization (🆕)
+- **[agent_self_learning_system.md](agent_self_learning_system.md)** - Revolutionary self-learning system (🆕)
+- **[future_ready_mcp_architecture.md](future_ready_mcp_architecture.md)** - MCP placeholder architecture (🆕)
+- **[future_ready_web_search_architecture.md](future_ready_web_search_architecture.md)** - Web search placeholder (🆕)
+- **[future_code_execution_architecture.md](future_code_execution_architecture.md)** - Code execution placeholder (🆕)
 
 ### 📁 security_compliance/ - Security & Compliance
 **Purpose**: Security implementation and compliance procedures
 
-- **[security_compliance_implementation.md](security_compliance_implementation.md)** - Comprehensive security implementation
+- **[security_compliance_implementation.md](security_compliance_implementation.md)** - Comprehensive security implementation (🆕 Enhanced with SSO, KYC, threat detection)
 - **[infinite_loop_prevention_guide.md](infinite_loop_prevention_guide.md)** - System safety and loop prevention
 - **[emergency_kill_switch_system.md](emergency_kill_switch_system.md)** - Emergency shutdown procedures
 - **[system_opacity_security_guidelines.md](system_opacity_security_guidelines.md)** - Security through opacity guidelines
@@ -62,10 +73,10 @@ This documentation provides comprehensive guidance for developing, deploying, an
 - **[implementation_director_guide.md](implementation_director_guide.md)** - Implementation Director methodology
 - **[implementation_director_templates.md](implementation_director_templates.md)** - Templates for Implementation Director
 - **[implementation_workflow_examples.md](implementation_workflow_examples.md)** - Example implementation workflows
-- **[real_time_audio_processing_validation.md](real_time_audio_processing_validation.md)** - Audio processing validation guidelines
+- **[realtime_audio_processing_validation.md](realtime_audio_processing_validation.md)** - Audio processing validation guidelines
 - **[version_management_system.md](version_management_system.md)** - Automated version management system
 - **[specification_reconciliation_process.md](specification_reconciliation_process.md)** - Specification alignment process
-- **[testing_strategy.md](testing_strategy.md)** - 🆕 Comprehensive testing framework and strategy
+- **[testing_strategy.md](testing_strategy.md)** - 🆕 Comprehensive testing framework and strategy (🆕 Enterprise feature tests added)
 
 ### 📁 operations/ - Operations & Deployment
 **Purpose**: Operational procedures, deployment, and monitoring
@@ -77,6 +88,10 @@ This documentation provides comprehensive guidance for developing, deploying, an
 - **[phone_number_management_guide.md](phone_number_management_guide.md)** - Phone number integration guide
 - **[deployment_runbook.md](deployment_runbook.md)** - 🆕 Production deployment procedures
 - **[monitoring_runbook.md](monitoring_runbook.md)** - 🆕 Monitoring and alerting procedures
+- **[realtime_agent_analytics_dashboard.md](realtime_agent_analytics_dashboard.md)** - Real-time Phoenix LiveView analytics (🆕)
+- **[production_readiness_gap_analysis.md](production_readiness_gap_analysis.md)** - The final 5% to production readiness (🆕)
+- **[claude4_platform_verification_guide.md](claude4_platform_verification_guide.md)** - Claude 4 platform verification and gaps (🆕)
+- **[documentation_update_plan.md](documentation_update_plan.md)** - Documentation update tracking and status (🆕)
 
 ### 📁 features/ - Features & Capabilities
 **Purpose**: Feature documentation and API references
@@ -85,18 +100,31 @@ This documentation provides comprehensive guidance for developing, deploying, an
 - **[claude_models_reference.md](claude_models_reference.md)** - Claude models reference and capabilities
 - **[anthropic_web_search_tool.md](anthropic_web_search_tool.md)** - Web search capabilities with Claude
 - **[claude_code_best_practices.md](claude_code_best_practices.md)** - Best practices for Claude Code integration
-- **[api_reference.md](api_reference.md)** - 🆕 Comprehensive API reference documentation
+- **[api_reference.md](api_reference.md)** - 🆕 Comprehensive API reference documentation (🆕 v1.4.0 with enterprise APIs)
 
 ### 📁 reference/ - Reference Materials
 **Purpose**: Reference materials and additional documentation
 
 - **[claude_code_tech.md](claude_code_tech.md)** - Technical documentation for Claude Code
 - **[claude_code_tutorials.md](claude_code_tutorials.md)** - Tutorials for Claude Code integration
+- **[anthropic_reference_guide.md](anthropic_reference_guide.md)** - Anthropic models and capabilities reference (🆕)
 
 ### 📁 archive/ - Archived Documents
 **Purpose**: Historical versions and deprecated documentation
 
 Contains original versions of documents that have been updated and superseded.
+
+## 🆕 New Enterprise Features
+
+### Enterprise Capabilities Added (v1.4.0)
+- **Billing & Revenue Management**: Complete billing system with usage metering, invoicing, and payment processing
+- **Enterprise SSO**: SAML 2.0, OIDC, Azure AD, Okta integration with session management
+- **KYC & Compliance**: Business verification, sanctions screening, and compliance workflows
+- **Quality Management**: AI-powered call quality scoring and performance analytics
+- **Feature Flags**: Gradual rollouts and A/B testing capabilities
+- **Partner Ecosystem**: Multi-tier partner programs with commission automation
+- **White Label**: Custom branding and domain support
+- **Advanced Security**: Threat detection, voice security monitoring, credential vault
 
 ## Quick Navigation
 
@@ -125,17 +153,19 @@ Contains original versions of documents that have been updated and superseded.
 
 ### Current Standardized Versions
 - **Elixir**: 1.18.3+
-- **Erlang/OTP**: 27.3.4+
+- **Erlang/OTP**: 28.0+ (latest stable)
 - **Phoenix**: 1.7.21+
-- **PostgreSQL**: 16.9+
+- **PostgreSQL**: 16.9+ (17.x available but 16.x recommended for stability)
 - **TimescaleDB**: 2.20.0+
-- **Redis**: 8.0+
-- **Membrane Framework**: 1.2.3+ (updated from 0.11.0)
-- **Docker**: 24.0+
+- **Redis**: 7.4.2+ (8.0 in RC, use stable 7.x)
+- **Membrane Core**: 1.2.2+ (latest stable release)
+- **Docker**: 28.0.0+ (latest stable)
+- **Node.js**: 22.15.0+ LTS (for Cloudflare Workers)
 
 ### AI/ML Stack
-- **Claude 3.7 Sonnet**: anthropic.claude-3-7-sonnet-20250219-v1:0 (Latest with extended thinking)
-- **Claude 3.5 Sonnet v2**: anthropic.claude-3-5-sonnet-20241022-v2:0 (Balanced performance)
+- **Claude 4 Opus**: anthropic.claude-4-opus-20250120 (Most advanced, extended thinking, tool calling)
+- **Claude 4 Sonnet**: anthropic.claude-4-sonnet-20250120 (Balanced performance, parallel tools)
+- **Claude 3.5 Sonnet v2**: anthropic.claude-3-5-sonnet-20241022-v2:0 (Production workhorse)
 - **Claude 3.5 Haiku**: anthropic.claude-3-5-haiku-20241022-v1:0 (Fastest intelligence)
 - **Claude 3 Haiku**: anthropic.claude-3-haiku-20240307-v1:0 (Most cost-effective)
 - **Deepgram Nova-3**: 54% accuracy improvement, multilingual support
@@ -150,11 +180,16 @@ Contains original versions of documents that have been updated and superseded.
 
 ## Implementation Status
 
-### ✅ Ready for Implementation (90%+)
+### ✅ Ready for Implementation (95%+)
+- **Claude 4 Platform**: Complete build guide with 16-week roadmap
 - **Phone Manager**: Complete specification with detailed implementation tasks
 - **Security Framework**: Comprehensive compliance and security implementation
 - **Development Methodology**: Robust Implementation Director process with templates
-- **Database Schema**: Complete design with relationships and migrations
+- **Database Schema**: Complete design with Claude 4 updates and learning system
+- **Self-Learning System**: Revolutionary agent improvement architecture
+- **Memory Architecture**: Dual-layer system with future Bedrock compatibility
+- **Tool Registry**: HTTP/webhook system ready for all SaaS integrations
+- **Analytics Dashboard**: Real-time Phoenix LiveView monitoring
 
 ### 🟡 Partially Ready (70-89%)
 - **Voice Pipeline**: Core architecture defined, optimization details needed
@@ -167,6 +202,31 @@ Contains original versions of documents that have been updated and superseded.
 - **Multi-region Deployment**: Operational procedures and automation needed
 - **Performance Optimization**: Detailed optimization strategies needed
 - **Advanced Analytics**: ML-driven insights implementation needed
+
+## Recent Updates (January 23, 2025)
+
+### 🆕 Claude 4 Implementation Documentation (May 23, 2025)
+- **Database Schema Updates**: Added comprehensive schema updates for Claude 4 features including learning system, enhanced memory, and parallel tools
+- **Build Guide**: Created complete 16-week implementation roadmap for building AYBIZA with Claude 4 from scratch
+- **Core Architecture**: Implemented 11 new architecture documents covering all Claude 4 capabilities
+- **Self-Learning System**: Revolutionary agent improvement system where every call makes agents better
+- **Memory Architecture**: Dual-layer Redis + DynamoDB system with future Bedrock readiness
+- **Tool Registry**: Comprehensive HTTP/webhook tool system for SaaS integrations
+- **Real-time Analytics**: Phoenix LiveView dashboard for monitoring agent performance
+- **Future-Ready**: Placeholder architectures for MCP, web search, and code execution
+
+### 🆕 Documentation Updates
+- **Docker Configuration**: Added Claude 4 model references and Python 3.11.12 runtime container configuration
+- **API Reference**: Updated with Claude 4 Opus/Sonnet model support in v1.3.0
+- **Integration Testing Guide**: Fixed Twilio mock examples (removed <Say> tags)
+- **Specification Development Guide**: Replaced Python examples with AYBIZA-relevant Elixir examples
+- **Voice Pipeline Architecture**: Added Claude 4 model constants
+
+### 📌 Important Notes
+- Claude 4 models ARE available on AWS Bedrock with full tool calling support via Converse API
+- Extended thinking uses token budgets (1024-64000), not time-based limits
+- Default prompt caching is 5 minutes (1-hour caching requires beta access)
+- Some features (MCP, direct code execution) require workarounds on Bedrock - use Lambda/tools instead
 
 ## Key Project Files
 

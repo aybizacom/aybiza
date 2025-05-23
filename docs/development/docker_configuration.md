@@ -105,7 +105,7 @@ volumes:
 
 ### Dockerfile.dev
 ```dockerfile
-FROM hexpm/elixir:1.18.3-erlang-27.3.4-debian-bookworm-20250517
+FROM hexpm/elixir:1.18.3-erlang-28.0-debian-bookworm-20250117
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -206,7 +206,7 @@ networks:
 
 ### Dockerfile.prod
 ```dockerfile
-FROM hexpm/elixir:1.18.3-erlang-27.3.4-debian-bookworm-20250517 AS build
+FROM hexpm/elixir:1.18.3-erlang-28.0-debian-bookworm-20250117 AS build
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -290,7 +290,7 @@ CMD ["/app/bin/aybiza", "start"]
 For the voice agent components that require additional dependencies, we use a specialized Dockerfile:
 
 ```dockerfile
-FROM hexpm/elixir:1.18.3-erlang-27.3.4-debian-bookworm-20250517 AS build
+FROM hexpm/elixir:1.18.3-erlang-28.0-debian-bookworm-20250117 AS build
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -422,8 +422,10 @@ LABEL org.label-schema.description="AYBIZA AI Voice Agent Platform"
    AWS_ACCESS_KEY_ID=your_aws_access_key_id
    AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
    AWS_REGION=us-east-1
-   AWS_BEDROCK_MODELS="anthropic.claude-3-5-sonnet-20241022-v2:0,anthropic.claude-3-haiku-20240307-v1:0"
-   AWS_DEFAULT_BEDROCK_MODEL=anthropic.claude-3-5-sonnet-20241022-v2:0
+   AWS_BEDROCK_MODELS="anthropic.claude-4-opus-20250120,anthropic.claude-4-sonnet-20250120,anthropic.claude-3-5-sonnet-20241022-v2:0,anthropic.claude-3-haiku-20240307-v1:0"
+   AWS_DEFAULT_BEDROCK_MODEL=anthropic.claude-4-opus-20250120
+   # NOTE: Claude 4 models (Opus/Sonnet) are NOW available on AWS Bedrock!
+   # Some features like MCP tool use may have limitations on Bedrock - see aws_bedrock_claude_implementation.md
    SECRET_KEY_BASE=a_long_secret_key_base
    ```
 
@@ -470,6 +472,133 @@ LABEL org.label-schema.description="AYBIZA AI Voice Agent Platform"
   - 4000: Phoenix application
   - 5432: PostgreSQL (dev only)
   - 6379: Redis (dev only)
+
+## Python Runtime Container for Code Execution
+
+### Development Environment with Python Support
+
+For Claude 4's code execution capabilities, we need a Python 3.11.12 runtime container:
+
+```dockerfile
+# Dockerfile.python-runtime - Python execution environment for Claude 4
+FROM python:3.11.12-slim-bookworm AS python-runtime
+
+# Install essential packages for code execution
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    curl \
+    wget \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create sandboxed environment
+RUN useradd --create-home --shell /bin/bash coderunner
+WORKDIR /home/coderunner
+
+# Set resource limits
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONIOENCODING=utf-8
+ENV MEMORY_LIMIT=1G
+ENV STORAGE_LIMIT=5G
+
+# Install common Python packages
+COPY requirements-runtime.txt .
+RUN pip install --no-cache-dir -r requirements-runtime.txt
+
+USER coderunner
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)"
+
+EXPOSE 8089
+
+CMD ["python", "-m", "http.server", "8089"]
+```
+
+### Python Runtime Integration with Elixir
+
+```yaml
+# docker-compose.yml addition for Python runtime
+services:
+  python_runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile.python-runtime
+    container_name: aybiza_python_runtime
+    environment:
+      MAX_MEMORY: 1G
+      MAX_STORAGE: 5G
+      EXECUTION_TIMEOUT: 30
+    volumes:
+      - python_workspace:/home/coderunner/workspace:rw
+    networks:
+      - aybiza_network
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  python_workspace:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=5G,uid=1000,gid=1000
+```
+
+### Security Considerations for Code Execution
+
+1. **Sandboxing**: Run Python code in isolated containers with restricted permissions
+2. **Resource Limits**: Enforce memory (1 GiB) and storage (5 GiB) limits
+3. **Network Isolation**: Restrict network access for code execution containers
+4. **Temporary Storage**: Use tmpfs for workspace to ensure cleanup
+5. **User Isolation**: Run as non-root user with minimal capabilities
+
+### Integration with AYBIZA Voice Agents
+
+```elixir
+# Example Elixir module for Python code execution
+defmodule Aybiza.CodeExecution.PythonRunner do
+  @moduledoc """
+  Manages Python code execution for Claude 4 agents
+  """
+  
+  def execute_code(code, timeout \\ 30_000) do
+    container_name = "aybiza_python_runtime"
+    
+    # Execute code in sandboxed environment
+    case System.cmd("docker", [
+      "exec", 
+      "-i", 
+      container_name,
+      "timeout", 
+      "#{timeout}s",
+      "python", 
+      "-c", 
+      code
+    ]) do
+      {output, 0} -> {:ok, output}
+      {error, _} -> {:error, error}
+    end
+  end
+end
+```
 
 ## Container Deployment Pipelines
 
@@ -647,7 +776,7 @@ artifacts:
 
 ```dockerfile
 # Dockerfile.codebuild - Optimized for AWS CodeBuild
-FROM hexpm/elixir:1.18.3-erlang-27.3.4-debian-bookworm-20250517 AS build
+FROM hexpm/elixir:1.18.3-erlang-28.0-debian-bookworm-20250117 AS build
 
 # Build arguments for environment-specific builds
 ARG MIX_ENV=prod
@@ -858,7 +987,7 @@ jobs:
       uses: erlef/setup-beam@v1
       with:
         elixir-version: '1.18.3'
-        otp-version: '27.3.4'
+        otp-version: '28.0'
     
     - name: Cache dependencies
       uses: actions/cache@v3

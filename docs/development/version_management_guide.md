@@ -29,12 +29,12 @@ Proper version management is critical for maintaining a stable, secure, and pred
 | Component | Version | Last Updated | Notes |
 |-----------|---------|--------------|-------|
 | Elixir | 1.18.3 | May 2025 | OTP compatibility, built-in JSON |
-| Erlang OTP | 27.3.4 | May 2025 | Latest stable release |
+| Erlang OTP | 28.0 | May 2025 | Latest stable release |
 | Phoenix | 1.7.21 | Mar 2025 | Verified routes, modern features |
 | PostgreSQL | 16.9 | May 2025 | TimescaleDB compatible |
 | TimescaleDB | 2.20.0 | Apr 2025 | Latest with PG 16 support |
-| Redis | 8.0.1 | May 2025 | Built-in modules integrated |
-| Membrane | 0.11.0 | Sep 2023 | Audio processing (Elixir) |
+| Redis | 7.4.2 | Nov 2024 | Latest stable release |
+| Membrane Core | 1.2.2 | Mar 2025 | Audio processing framework |
 
 ### AWS Services (Primary Regions)
 | Service | Version/Configuration | Regions | Notes |
@@ -43,7 +43,7 @@ Proper version management is critical for maintaining a stable, secure, and pred
 | ECS | Latest API (pinned via SDK) | us-east-1, us-west-2, eu-west-1 | Managed service |
 | Lambda | Runtime nodejs22.x | us-east-1, us-west-2, eu-west-1 | Latest LTS version |
 | Aurora PostgreSQL | 16.9 | us-east-1, us-west-2, eu-west-1 | Multi-AZ, Global Database |
-| ElastiCache Redis | 8.0 | us-east-1, us-west-2, eu-west-1 | Cluster mode, Global Datastore |
+| ElastiCache Redis | 7.1 | us-east-1, us-west-2, eu-west-1 | Cluster mode, Global Datastore |
 | DynamoDB | API Version 2012-08-10 | Global | Global Tables enabled |
 | Bedrock | API Version 2023-05-31 | us-east-1, us-west-2, eu-west-1 | Claude 3.7 Sonnet optimized |
 
@@ -67,9 +67,9 @@ Proper version management is critical for maintaining a stable, secure, and pred
 ### Docker Images
 | Image | Version | Purpose | Registry |
 |-------|---------|---------|----------|
-| hexpm/elixir | 1.18.3-erlang-27.3.4-debian-bookworm-20250517 | Base image | Docker Hub |
+| hexpm/elixir | 1.18.3-erlang-28.0-debian-bookworm-20250517 | Base image | Docker Hub |
 | timescale/timescaledb | 2.20.0-pg16 | Database | Docker Hub |
-| redis | 8.0.1-alpine3.21 | Cache | Docker Hub |
+| redis | 7.4.2-alpine | Cache | Docker Hub |
 | debian | bookworm-slim | Runtime | Docker Hub |
 
 ### AI Models (AWS Bedrock)
@@ -120,7 +120,7 @@ Phoenix.Flash.get(conn, :info)
 # Not: Phoenix.Controller.get_flash(conn, :info)
 ```
 
-### Redis 8.0 Configuration
+### Redis 7.4 Configuration
 
 ```elixir
 defmodule Aybiza.Redis.Client do
@@ -138,12 +138,11 @@ defmodule Aybiza.Redis.Client do
       ],
       reconnection_attempts: 10,
       reconnection_backoff: 100,
-      # Redis 8 built-in features
-      enable_query_engine: true,
-      enable_json: true,
-      enable_search: true,
-      enable_timeseries: true,
-      enable_bloom: true
+      # Redis 7.4 features with modules
+      enable_redisearch: true,
+      enable_redisjson: true,
+      enable_redistimeseries: true,
+      enable_redisbloom: true
     }
   end
 end
@@ -199,7 +198,7 @@ variable "fargate_platform_version" {
 }
 
 variable "lambda_runtime" {
-  default = "nodejs20.x"  # Not "latest"
+  default = "nodejs22.x"  # Latest LTS version
 }
 ```
 
@@ -214,7 +213,7 @@ When building from scratch, always start with the latest stable versions to ensu
 ### Docker Configuration
 ```dockerfile
 # Use the latest stable versions
-FROM hexpm/elixir:1.18.3-erlang-27.3.4-debian-bookworm-20250517
+FROM hexpm/elixir:1.18.3-erlang-28.0-debian-bookworm-20250517
 
 # Use modern slim images
 FROM debian:bookworm-slim
@@ -257,7 +256,7 @@ jobs:
       uses: erlef/setup-beam@v1
       with:
         elixir-version: '1.18.3'
-        otp-version: '27.3.4'
+        otp-version: '28.0'
     
     - name: Install dependencies
       run: mix deps.get
@@ -424,7 +423,7 @@ config :aybiza, :versions,
 - Elixir 1.18.3
 - Phoenix 1.7.21
 - PostgreSQL 16.9
-- Redis 8.0.1
+- Redis 7.4.1
 - TimescaleDB 2.20.0
 ```
 

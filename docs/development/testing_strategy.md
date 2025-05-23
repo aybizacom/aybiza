@@ -114,19 +114,46 @@ describe('Voice Router Worker', () => {
 #### Service Integration Testing:
 ```elixir
 defmodule AybizaWeb.VoiceGatewayIntegrationTest do
-  use AybizaWeb.ConnCase
+  use AybizaWeb.ConnCase, async: false  # Disable async for integration tests
   import Phoenix.ChannelTest
 
   @endpoint AybizaWeb.Endpoint
   @moduletag :integration
 
+  setup_all do
+    # Global test setup - runs once for all tests
+    :ok = Ecto.Adapters.SQL.Sandbox.mode(Aybiza.Repo, :manual)
+    
+    # Start mock services
+    {:ok, _} = start_supervised({MockDeepgram, []})
+    {:ok, _} = start_supervised({MockBedrock, []})
+    
+    on_exit(fn ->
+      # Cleanup after all tests
+      :ok = Ecto.Adapters.SQL.Sandbox.mode(Aybiza.Repo, :auto)
+    end)
+    
+    :ok
+  end
+
   setup do
-    # Start test services
-    start_supervised!({VoiceGateway.CallSupervisor, []})
-    start_supervised!({VoicePipeline.AudioProcessor, []})
+    # Per-test setup
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Aybiza.Repo)
+    
+    # Start test services with unique names to avoid conflicts
+    test_id = System.unique_integer([:positive])
+    
+    {:ok, _} = start_supervised({VoiceGateway.CallSupervisor, name: :"call_sup_#{test_id}"})
+    {:ok, _} = start_supervised({VoicePipeline.AudioProcessor, name: :"audio_proc_#{test_id}"})
     
     {:ok, socket} = connect(VoiceGateway.CallSocket, %{})
-    {:ok, socket: socket}
+    
+    on_exit(fn ->
+      # Ensure proper cleanup
+      Ecto.Adapters.SQL.Sandbox.checkin(Aybiza.Repo)
+    end)
+    
+    {:ok, socket: socket, test_id: test_id}
   end
 
   test "complete voice processing pipeline", %{socket: socket} do
@@ -342,7 +369,7 @@ end
 ### 1. Authentication Testing
 ```elixir
 defmodule SecurityTest do
-  use AybizaWeb.ConnCase
+  use AybizaWeb.ConnCase, async: false
   
   test "rejects unauthenticated requests" do
     conn = build_conn()
@@ -375,7 +402,7 @@ end
 ### 2. Input Validation Testing
 ```elixir
 defmodule InputValidationTest do
-  use AybizaWeb.ConnCase
+  use AybizaWeb.ConnCase, async: false
   
   test "sanitizes audio input data" do
     # Test malicious audio data
@@ -401,6 +428,243 @@ defmodule InputValidationTest do
 end
 ```
 
+## Enterprise Feature Testing
+
+### 1. Billing & Payment Testing
+```elixir
+defmodule BillingTest do
+  use AybizaWeb.ConnCase, async: false
+  
+  describe "usage metering" do
+    test "accurately tracks resource usage" do
+      # Start tracking
+      {:ok, session} = UsageMetering.start_session(:call_minutes, tenant_id)
+      
+      # Simulate usage
+      :timer.sleep(60_000) # 1 minute
+      
+      # End tracking
+      {:ok, usage} = UsageMetering.end_session(session)
+      
+      assert usage.quantity == 1.0
+      assert usage.unit == "minutes"
+      assert usage.resource_type == "call_minutes"
+    end
+    
+    test "handles concurrent usage tracking" do
+      # Test multiple concurrent sessions
+      sessions = for _ <- 1..100 do
+        Task.async(fn ->
+          UsageMetering.track_usage(:api_calls, tenant_id, 1)
+        end)
+      end
+      
+      results = Task.await_many(sessions)
+      assert Enum.all?(results, &match?({:ok, _}, &1))
+    end
+  end
+  
+  describe "invoice generation" do
+    test "generates accurate invoices" do
+      # Create test usage data
+      create_test_usage_data(tenant_id, ~D[2025-01-01], ~D[2025-01-31])
+      
+      # Generate invoice
+      {:ok, invoice} = InvoiceGenerator.generate_monthly_invoice(
+        tenant_id, 
+        ~D[2025-01-01], 
+        ~D[2025-01-31]
+      )
+      
+      assert invoice.subtotal > 0
+      assert invoice.tax_amount > 0
+      assert invoice.total_amount == invoice.subtotal + invoice.tax_amount
+    end
+  end
+end
+```
+
+### 2. SSO & Identity Testing
+```elixir
+defmodule SSOTest do
+  use AybizaWeb.ConnCase, async: false
+  
+  describe "SAML authentication" do
+    test "validates SAML assertions" do
+      saml_response = load_fixture("saml_response.xml")
+      
+      {:ok, user_attrs} = SAMLHandler.validate_response(saml_response)
+      
+      assert user_attrs.email
+      assert user_attrs.name
+      assert user_attrs.roles
+    end
+    
+    test "handles JIT provisioning" do
+      saml_attrs = %{
+        email: "new.user@company.com",
+        name: "New User",
+        department: "Engineering"
+      }
+      
+      {:ok, user} = IdentityManager.provision_user(saml_attrs, :jit)
+      
+      assert user.email == "new.user@company.com"
+      assert user.provisioning_source == :sso
+    end
+  end
+  
+  describe "session management" do
+    test "enforces session timeouts" do
+      # Create session
+      {:ok, session} = SessionManager.create_session(user_id)
+      
+      # Fast forward time
+      advance_time(minutes: 31)
+      
+      # Verify session expired
+      assert {:error, :session_expired} = SessionManager.validate_session(session.token)
+    end
+  end
+end
+```
+
+### 3. KYC & Compliance Testing
+```elixir
+defmodule ComplianceTest do
+  use ExUnit.Case, async: false
+  
+  describe "KYC verification" do
+    test "processes business verification" do
+      documents = [
+        %{type: "incorporation", file_path: "test/fixtures/inc_cert.pdf"},
+        %{type: "tax_certificate", file_path: "test/fixtures/tax_cert.pdf"}
+      ]
+      
+      {:ok, verification} = KYCService.submit_verification(
+        organization_id,
+        :business,
+        documents
+      )
+      
+      assert verification.status == "pending"
+      assert length(verification.documents) == 2
+    end
+    
+    test "performs sanctions screening" do
+      # Mock sanctions API
+      expect(SanctionsAPIMock, :check, fn _name, _country ->
+        {:ok, %{status: "clear", matches: []}}
+      end)
+      
+      {:ok, result} = SanctionsScreening.check_entity(
+        "ACME Corporation",
+        "US"
+      )
+      
+      assert result.status == "clear"
+    end
+  end
+end
+```
+
+### 4. Quality Management Testing
+```elixir
+defmodule QualityTest do
+  use ExUnit.Case, async: false
+  
+  describe "call quality scoring" do
+    test "scores call quality accurately" do
+      call_data = load_test_call_data()
+      
+      {:ok, scores} = QualityScorer.analyze_call(call_data)
+      
+      assert scores.overall_score >= 0.0 and scores.overall_score <= 1.0
+      assert scores.audio_quality_score
+      assert scores.agent_performance_score
+    end
+    
+    test "detects quality issues" do
+      poor_quality_call = load_poor_quality_call()
+      
+      {:ok, scores} = QualityScorer.analyze_call(poor_quality_call)
+      
+      assert scores.overall_score < 0.7
+      assert length(scores.issues_detected) > 0
+    end
+  end
+end
+```
+
+### 5. Feature Flag Testing
+```elixir
+defmodule FeatureFlagTest do
+  use ExUnit.Case, async: false
+  
+  describe "feature flag evaluation" do
+    test "evaluates percentage rollouts" do
+      # Create flag with 50% rollout
+      {:ok, flag} = FeatureFlags.create_flag(
+        "new_feature",
+        rollout_percentage: 50.0
+      )
+      
+      # Test distribution
+      results = for i <- 1..1000 do
+        FeatureFlags.is_enabled?("new_feature", "user_#{i}")
+      end
+      
+      enabled_count = Enum.count(results, & &1)
+      assert enabled_count > 450 and enabled_count < 550
+    end
+    
+    test "respects targeting rules" do
+      {:ok, _flag} = FeatureFlags.create_flag(
+        "enterprise_feature",
+        targeting_rules: %{
+          tenant_tiers: ["enterprise"]
+        }
+      )
+      
+      assert FeatureFlags.is_enabled?(
+        "enterprise_feature", 
+        user_id,
+        %{tenant_tier: "enterprise"}
+      )
+      
+      refute FeatureFlags.is_enabled?(
+        "enterprise_feature",
+        user_id,
+        %{tenant_tier: "standard"}
+      )
+    end
+  end
+end
+```
+
+### 6. Partner Management Testing
+```elixir
+defmodule PartnerTest do
+  use AybizaWeb.ConnCase, async: false
+  
+  describe "commission calculation" do
+    test "calculates partner commissions accurately" do
+      partner = create_test_partner(commission_rate: 25.0)
+      create_partner_revenue(partner, 10_000.00)
+      
+      {:ok, commission} = CommissionCalculator.calculate_monthly_commission(
+        partner.id,
+        ~D[2025-01-01],
+        ~D[2025-01-31]
+      )
+      
+      assert commission.amount == 2_500.00
+      assert commission.rate == 25.0
+    end
+  end
+end
+```
+
 ## Test Infrastructure
 
 ### 1. Test Environment Setup
@@ -418,7 +682,7 @@ services:
       - "5433:5432"
       
   redis-test:
-    image: redis:8.0
+    image: redis:7.4.2-alpine
     ports:
       - "6380:6379"
       
@@ -466,7 +730,7 @@ jobs:
       uses: erlef/setup-beam@v1
       with:
         elixir-version: '1.18.3'
-        otp-version: '27.3.4'
+        otp-version: '28.0'
         
     - name: Install dependencies
       run: mix deps.get
@@ -542,6 +806,99 @@ defmodule DeepgramMockResponses do
   end
 end
 ```
+
+## Async Test Safety Guidelines
+
+### 1. Integration Test Setup
+Integration tests that interact with databases, external services, or shared resources must disable async execution:
+
+```elixir
+defmodule MyIntegrationTest do
+  use AybizaWeb.ConnCase, async: false
+  
+  setup_all do
+    # Set up shared resources once for all tests
+    :ok = Ecto.Adapters.SQL.Sandbox.mode(Aybiza.Repo, :manual)
+    :ok
+  end
+  
+  setup do
+    # Check out connection for each test
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Aybiza.Repo)
+    
+    # Ensure cleanup on exit
+    on_exit(fn ->
+      # Clean up any resources created during test
+    end)
+    
+    :ok
+  end
+end
+```
+
+### 2. Database Isolation
+For tests that use the database:
+
+```elixir
+# In test_helper.exs
+Ecto.Adapters.SQL.Sandbox.mode(Aybiza.Repo, :manual)
+
+# In each test module
+setup do
+  :ok = Ecto.Adapters.SQL.Sandbox.checkout(Aybiza.Repo)
+  
+  # For tests that spawn processes
+  unless tags[:async] do
+    Ecto.Adapters.SQL.Sandbox.mode(Aybiza.Repo, {:shared, self()})
+  end
+  
+  :ok
+end
+```
+
+### 3. External Service Mocking
+Ensure external services are properly mocked to avoid conflicts:
+
+```elixir
+setup do
+  # Mock external services before each test
+  stub(DeepgramMock, :transcribe, fn _audio -> 
+    {:ok, %{transcript: "test", confidence: 0.95}}
+  end)
+  
+  stub(BedrockMock, :generate_response, fn _prompt ->
+    {:ok, %{response: "test response"}}
+  end)
+  
+  :ok
+end
+```
+
+### 4. Resource Cleanup
+Always clean up resources to prevent test pollution:
+
+```elixir
+setup do
+  # Create test resources
+  {:ok, agent} = create_test_agent()
+  
+  on_exit(fn ->
+    # Clean up resources
+    delete_test_agent(agent)
+    clear_redis_test_keys()
+    cleanup_test_files()
+  end)
+  
+  {:ok, agent: agent}
+end
+```
+
+### 5. Async Test Rules
+- **Unit tests**: Can use `async: true` if they don't share state
+- **Integration tests**: Must use `async: false`
+- **Tests with database**: Must use `async: false` or proper sandbox setup
+- **Tests with external services**: Must use `async: false`
+- **Tests with file I/O**: Must use `async: false` or unique file paths
 
 ## Test Metrics and Reporting
 

@@ -32,9 +32,11 @@ Memory/Document → Preprocessing → Embedding Generation →
 defmodule Aybiza.AWS.KnowledgeBaseClient do
   @moduledoc """
   Client for AWS Bedrock Knowledge Base
+  Note: This uses the aws-elixir library (not ex_aws) for AWS SDK functionality
   """
   
   require Logger
+  alias AWS.Client
   
   @doc """
   Create a new knowledge base
@@ -60,7 +62,7 @@ defmodule Aybiza.AWS.KnowledgeBaseClient do
     }
     
     # Create the knowledge base
-    case ExAws.Bedrock.KnowledgeBases.create_knowledge_base(kb_id, kb_config) do
+    case AWS.BedrockAgent.create_knowledge_base(client(), kb_config) do
       {:ok, response} ->
         # Log creation
         Logger.info("Created knowledge base: #{name}", %{
@@ -99,7 +101,7 @@ defmodule Aybiza.AWS.KnowledgeBaseClient do
     }
     
     # Add document to knowledge base
-    case ExAws.Bedrock.KnowledgeBases.ingest_document(knowledge_base_id, document) do
+    case AWS.BedrockAgent.ingest_to_knowledge_base(client(), knowledge_base_id, document) do
       {:ok, response} ->
         # Log addition
         Logger.info("Added document to knowledge base", %{
@@ -126,7 +128,7 @@ defmodule Aybiza.AWS.KnowledgeBaseClient do
   """
   def delete_document(knowledge_base_id, document_id) do
     # Delete document
-    case ExAws.Bedrock.KnowledgeBases.delete_document(knowledge_base_id, document_id) do
+    case AWS.BedrockAgent.delete_from_knowledge_base(client(), knowledge_base_id, document_id) do
       {:ok, _} ->
         # Log deletion
         Logger.info("Deleted document from knowledge base", %{
@@ -178,7 +180,7 @@ defmodule Aybiza.AWS.KnowledgeBaseClient do
     end
     
     # Execute search
-    case ExAws.Bedrock.KnowledgeBases.query(search_request) do
+    case AWS.BedrockAgentRuntime.retrieve(client(), knowledge_base_id, search_request) do
       {:ok, response} ->
         # Process results
         results = process_search_results(response)
@@ -220,7 +222,7 @@ defmodule Aybiza.AWS.KnowledgeBaseClient do
     model_arn = get_model_arn(model)
     
     # Generate embedding
-    case ExAws.Bedrock.Runtime.invoke_model(model_arn, payload_json) do
+    case AWS.BedrockRuntime.invoke_model(client(), model_arn, payload_json) do
       {:ok, response} ->
         # Parse response
         parsed = Jason.decode!(response.body)
@@ -259,7 +261,7 @@ defmodule Aybiza.AWS.KnowledgeBaseClient do
   # Get model ARN from name
   defp get_model_arn(model_name) do
     # Get AWS region
-    region = Application.get_env(:ex_aws, :region, "us-east-1")
+    region = Application.get_env(:aybiza, :aws_region, "us-east-1")
     
     # Get AWS account ID
     account_id = Application.get_env(:aybiza, :aws_account_id)
@@ -271,7 +273,7 @@ defmodule Aybiza.AWS.KnowledgeBaseClient do
   # Get IAM role ARN
   defp get_role_arn do
     # Get AWS region
-    region = Application.get_env(:ex_aws, :region, "us-east-1")
+    region = Application.get_env(:aybiza, :aws_region, "us-east-1")
     
     # Get AWS account ID
     account_id = Application.get_env(:aybiza, :aws_account_id)
@@ -281,6 +283,15 @@ defmodule Aybiza.AWS.KnowledgeBaseClient do
     
     # Construct ARN
     "arn:aws:iam::#{account_id}:role/#{role_name}"
+  end
+  
+  # Get AWS client
+  defp client do
+    AWS.Client.create(
+      Application.get_env(:aybiza, :aws_access_key_id),
+      Application.get_env(:aybiza, :aws_secret_access_key),
+      Application.get_env(:aybiza, :aws_region, "us-east-1")
+    )
   end
   
   # Sanitize name for use in IDs

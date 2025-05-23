@@ -52,11 +52,10 @@ env $(cat .env.test | xargs) mix test
 # Example of mocking Twilio in tests
 defmodule Aybiza.MockTwilio do
   def generate_twiml(params) do
-    # Return predictable TwiML for testing
+    # Return predictable TwiML for testing - AYBIZA uses streaming, not <Say>
     """
     <?xml version="1.0" encoding="UTF-8"?>
     <Response>
-        <Say>This is a test response</Say>
         <Connect>
             <Stream url="wss://test-url.example.com/stream" />
         </Connect>
@@ -371,7 +370,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18.3'
-          otp-version: '27.3.4'
+          otp-version: '28.0'
       - run: mix deps.get
       - run: mix test --only integration
 ```

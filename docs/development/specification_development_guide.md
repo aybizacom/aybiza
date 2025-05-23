@@ -145,193 +145,178 @@ After Claude completes the implementation:
 
 ## Specification Examples
 
-### Example 1: HTML Slider Output and Charts Feature
+### Example 1: Voice Agent Call Analytics Feature
 
 ```markdown
-# HTML Slider Output and Charts Feature
+# Voice Agent Call Analytics Feature
 
 ## High-Level Objective
 
-- Create an interactive HTML output format with dynamic word frequency visualization
+- Create a comprehensive call analytics system for AYBIZA voice agents
 
 ## Mid-Level Objective
 
-- Build new HTML output format with slider-based word frequency filtering
-- Add radial bar and bubble chart visualizations for word frequencies
-- Extend CLI to support new output formats
-- Ensure comprehensive test coverage
+- Build analytics GenServer to track call metrics in real-time
+- Add sentiment analysis using Claude 4 for completed calls
+- Create Phoenix LiveView dashboard for analytics visualization
+- Ensure comprehensive test coverage with proper mocking
 
 ## Implementation Notes
-- No need to import any external libraries beyond existing dependencies
-- Comment every new function
-- For CLI commands add usage examples starting with `uv run main.py`
-- Follow existing code patterns and type safety practices
-- Add tests for all new functionality
+- Follow OTP principles and supervision tree patterns
+- Use Ecto for persistence with TimescaleDB extensions
+- Leverage Phoenix PubSub for real-time updates
+- Add telemetry events for monitoring
+- Follow existing AYBIZA coding standards
 
 ## Context
 
 ### Beginning context
-- `src/let_the_code_write_itself/output_format.py`
-- `src/let_the_code_write_itself/chart.py`
-- `src/let_the_code_write_itself/main.py`
-- `src/let_the_code_write_itself/tests/output_format_test.py`
-- `src/let_the_code_write_itself/tests/chart_test.py`
+- `apps/analytics/lib/analytics/call_tracker.ex`
+- `apps/analytics/lib/analytics/sentiment_analyzer.ex`
+- `apps/analytics_web/lib/analytics_web/live/dashboard_live.ex`
+- `apps/analytics/test/analytics/call_tracker_test.exs`
 
 ### Ending context
-- `src/let_the_code_write_itself/output_format.py`
-- `src/let_the_code_write_itself/chart.py`
-- `src/let_the_code_write_itself/main.py`
-- `src/let_the_code_write_itself/tests/output_format_test.py`
-- `src/let_the_code_write_itself/tests/chart_test.py`
+- `apps/analytics/lib/analytics/call_tracker.ex` (modified)
+- `apps/analytics/lib/analytics/sentiment_analyzer.ex` (modified)
+- `apps/analytics_web/lib/analytics_web/live/dashboard_live.ex` (modified)
+- `apps/analytics/lib/analytics/metrics_aggregator.ex` (new)
+- `apps/analytics/test/analytics/call_tracker_test.exs` (modified)
+- `apps/analytics/test/analytics/metrics_aggregator_test.exs` (new)
 
 ## Low-Level Tasks
 > Ordered from start to finish
 
-1. Add new HTML output format with slider
+1. Create metrics aggregator GenServer
 ```claude
-UPDATE src/let_the_code_write_itself/output_format.py:
-    CREATE format_as_html_with_slider_filter() function:
-        Add HTML template with slider control
-        Add JavaScript for dynamic filtering
-        MIRROR format_as_html()
+CREATE apps/analytics/lib/analytics/metrics_aggregator.ex:
+    IMPLEMENT GenServer for real-time metrics aggregation:
+        Handle call start/end events
+        Calculate moving averages for latency
+        Track concurrent call counts
+        Implement ETS-based state for performance
 ```
 
-2. Add new chart visualizations
+2. Enhance sentiment analyzer with Claude 4
 ```claude
-UPDATE src/let_the_code_write_itself/chart.py:
-    CREATE create_radial_bar_chart(word_counts: WordCounts), create_bubble_chart(...)
+UPDATE apps/analytics/lib/analytics/sentiment_analyzer.ex:
+    UPDATE analyze_transcript/1 function:
+        Use Claude 4 Opus for complex sentiment analysis
+        Add emotion detection and satisfaction scoring
+        Implement retry logic with exponential backoff
 ```
 
-3. Update CLI interface
+3. Update Phoenix LiveView dashboard
 ```claude
-UPDATE src/let_the_code_write_itself/main.py:
-    ADD support for checking .htmlsld extension and calling format_as_html_with_slider_filter()
-        Be sure to use .html when saving the file, .htmlsld is just for checking
-    ADD support for 'radial' and 'bubble' choices and calling respective chart functions
+UPDATE apps/analytics_web/lib/analytics_web/live/dashboard_live.ex:
+    ADD real-time chart components:
+        Implement WebSocket updates via PubSub
+        Add D3.js integration for dynamic visualizations
+        Create drill-down views for individual agents
 ```
 
-4. Add comprehensive tests
+4. Add comprehensive test coverage
 ```claude
-UPDATE test files:
-    ADD test_format_as_html_with_slider_filter()
-    ADD test_create_radial_bar_chart()
-    ADD test_create_bubble_chart()
+UPDATE apps/analytics/test/analytics/call_tracker_test.exs:
+    ADD integration tests with mocked Twilio events
+    ADD performance tests for high-volume scenarios
+CREATE apps/analytics/test/analytics/metrics_aggregator_test.exs:
+    ADD GenServer behavior tests
+    ADD ETS state management tests
 ```
 ```
 
-### Example 2: Transcript Analytics Feature
+### Example 2: Voice Pipeline Audio Processing Feature
 
 ```markdown
-# Transcript Analytics Specification
+# Voice Pipeline Audio Processing Specification
 
 ## High-Level Objective
 
-- Create a CLI transcript analytics application
+- Create a real-time audio processing pipeline for AYBIZA voice agents
 
 ## Mid-Level Objective
 
-- Build a python MVP typer CLI application
-- Accept a path to a text file
-- Count the frequency of each word in a file, filter out common words, and limit by count threshold
-- Use an OpenAI chat completion with structured output to analyze the transcript and word counts
-- Rich print the frequency of each word to the terminal and the transcript analysis
+- Build Membrane Framework pipeline for audio processing
+- Implement Voice Activity Detection (VAD) at the edge
+- Add audio format conversion and optimization
+- Integrate with Deepgram STT and TTS services
+- Ensure ultra-low latency (<100ms) processing
 
 ## Implementation Notes
-- No need to import any external libraries (see pyproject.toml for dependencies)
-- Comment every function
-- For typer commands add usage examples starting with `uv run main <func name dash sep and params>`
-- When code block is given in low-level tasks, use it without making changes (Task 4)
-- Carefully review each low-level task for exact code changes
+- Use Membrane Framework for audio pipeline construction
+- Follow AYBIZA's edge-first processing architecture
+- Implement proper error handling and circuit breakers
+- Add comprehensive telemetry and metrics
+- Ensure compatibility with WebRTC and Twilio formats
 
 ## Context
 
 ### Beginning context
-- `src/spec_based_ai_coding/main.py`
-- `pyproject.toml` (readonly)
+- `apps/voice_pipeline/lib/voice_pipeline/audio_processor.ex`
+- `apps/voice_pipeline/lib/voice_pipeline/membrane/pipeline.ex`
+- `apps/voice_pipeline/test/voice_pipeline/audio_processor_test.exs`
 
 ### Ending context
-- `src/spec_based_ai_coding/main.py`
-- `pyproject.toml`
-- `src/spec_based_ai_coding/llm.py` (new file)
-- `src/spec_based_ai_coding/word_counter.py` (new file)
-- `src/spec_based_ai_coding/data_types.py` (new file)
-- `src/spec_based_ai_coding/constants.py` (new file)
+- `apps/voice_pipeline/lib/voice_pipeline/audio_processor.ex` (modified)
+- `apps/voice_pipeline/lib/voice_pipeline/membrane/pipeline.ex` (modified)
+- `apps/voice_pipeline/lib/voice_pipeline/membrane/vad_filter.ex` (new)
+- `apps/voice_pipeline/lib/voice_pipeline/membrane/format_converter.ex` (new)
+- `apps/voice_pipeline/lib/voice_pipeline/edge_processor.ex` (new)
+- `apps/voice_pipeline/test/voice_pipeline/audio_processor_test.exs` (modified)
+- `apps/voice_pipeline/test/voice_pipeline/edge_processor_test.exs` (new)
 
 ## Low-Level Tasks
 > Ordered from start to finish
 
-1. Create common word blacklist
+1. Create VAD filter using Membrane
 ```claude
-CREATE src/spec_based_ai_coding/constants.py: 
-    CREATE COMMON_WORDS_BLACKLIST = ['the', 'and', ...add 50 more common words]
+CREATE apps/voice_pipeline/lib/voice_pipeline/membrane/vad_filter.ex:
+    IMPLEMENT Membrane.Filter behaviour:
+        Handle audio frames with 10ms windows
+        Implement energy-based VAD with 800ms threshold
+        Add state machine for speech/silence detection
+        Emit events for speech boundaries
 ```
 
-2. Create our data types
+2. Create audio format converter
 ```claude
-CREATE src/spec_based_ai_coding/data_types.py:
-
-    CREATE pydantic types:
-
-        WordCounts(BaseModel): {count_to_word_map: Dict[str, int]},
-
-        TranscriptAnalysis(BaseModel): {
-            quick_summary: str
-            bullet_point_highlights: List[str]
-            sentiment_analysis: str
-            keywords: List[str]
-        }
+CREATE apps/voice_pipeline/lib/voice_pipeline/membrane/format_converter.ex:
+    IMPLEMENT format conversion filter:
+        Convert between μ-law, PCM, and Opus
+        Handle sample rate conversion (8kHz/16kHz)
+        Optimize for low latency processing
+        Add format negotiation logic
 ```
 
-3. Create our word counter & filter out & limit by count threshold
+3. Implement edge processor for local VAD
 ```claude
-CREATE src/spec_based_ai_coding/word_counter.py:
-    CREATE word_counter(script: str, min_count_threshold: int = 10) -> WordCounts:
-        Remove punctuation from script and make all words lowercase,
-        Use the COMMON_WORDS_BLACKLIST to filter out common words,
-        Only include words that are greater than the min_count_threshold.
-        Sort descending by count.
+CREATE apps/voice_pipeline/lib/voice_pipeline/edge_processor.ex:
+    IMPLEMENT GenServer for edge processing:
+        Process audio locally before cloud transmission
+        Implement sliding window buffer (200ms)
+        Add speech detection with confidence scoring
+        Coordinate with main pipeline via message passing
 ```
 
-4. Create our LLM function using the code block below
-```python
-# CREATE src/spec_based_ai_coding/llm.py: Use code block below no changes.
-
-    from typing import List
-    from pydantic import BaseModel
-    from openai import OpenAI
-    from .data_types import TranscriptAnalysis
-
-    client = OpenAI()
-
-
-    def analyze_transcript(transcript: str, word_count: dict) -> TranscriptAnalysis:
-        completion = client.beta.chat.completions.parse(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant analyzing transcripts.",
-                },
-                {"role": "user", "content": f"{transcript}\n\nWord Count: {word_count}"},
-            ],
-            response_format=TranscriptAnalysis,
-        )
-
-        message = completion.choices[0].message
-        if message.parsed:
-            return message.parsed
-        else:
-            raise ValueError("Failed to parse the response")
+4. Update main pipeline with new components
+```claude
+UPDATE apps/voice_pipeline/lib/voice_pipeline/membrane/pipeline.ex:
+    MODIFY handle_init/2 callback:
+        Add VAD filter to pipeline spec
+        Configure format converter based on input/output
+        Set up telemetry collectors
+    ADD dynamic pipeline reconfiguration support
 ```
 
-5. Update our main function to use new count and analysis functions
-
+5. Add comprehensive test coverage
 ```claude
-UPDATE src/spec_based_ai_coding/main.py:
-    CREATE a new typer cli application:
-        CREATE @app.command() def analyze_transcript(path_to_script_text_file, min_count_threshold: int = 10):
-            Read file, count words, run analysis, rich print results,
-            print words like '<word>: ###' where ### is count 3
+UPDATE apps/voice_pipeline/test/voice_pipeline/audio_processor_test.exs:
+    ADD tests for VAD accuracy with sample audio
+    ADD latency measurement tests
+CREATE apps/voice_pipeline/test/voice_pipeline/edge_processor_test.exs:
+    ADD edge processing unit tests
+    ADD integration tests with mock audio streams
 ```
 ```
 

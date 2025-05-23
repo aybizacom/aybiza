@@ -2,7 +2,7 @@
 
 ## High-Level Hybrid Architecture
 
-The AYBIZA platform is built as a cutting-edge hybrid edge-cloud architecture that combines Cloudflare's global edge network with AWS backend services to deliver ultra-low latency, enterprise-grade security, and global scale.
+The AYBIZA platform is built as a billion-scale hybrid edge-cloud architecture that combines Cloudflare's global edge network with AWS backend services to deliver ultra-low latency (<100ms), enterprise-grade security, and support for millions of concurrent AI voice agents powered by Claude 4 Opus/Sonnet models.
 
 ### Hybrid Architecture Overview
 ```
@@ -15,9 +15,10 @@ Cloudflare Edge (300+ locations)
 └── Security Layer (WAF + DDoS)
     ↓
 AWS Multi-Region Backend
-├── US East (Primary) - Claude 3.7/3.5
+├── US East (Primary) - Claude 4 Opus/Sonnet, 3.5 models
 ├── EU West (Primary) - GDPR Compliant
-└── US West (Secondary) - Failover
+├── US West (Secondary) - Failover
+└── Asia Pacific (Sydney) - Regional Expansion
 ```
 
 ### Technology Stack (Updated)
@@ -30,22 +31,36 @@ AWS Multi-Region Backend
 - **Analytics**: Real User Monitoring, Web Analytics
 
 #### Backend Layer: AWS Services
-- **Runtime**: Elixir 1.18.3 / Erlang OTP 27.3.4
+- **Runtime**: Elixir 1.18.3 / Erlang OTP 28.0
 - **Framework**: Phoenix 1.7.21 with LiveView
-- **Database**: PostgreSQL 16.9 with TimescaleDB 2.20.0
-- **Cache**: Redis 8.0 with cluster mode and new features
-- **Media**: Membrane Framework 0.11.0
+- **Database**: 
+  - PostgreSQL 16.9 with Citus 12.1 (horizontal sharding)
+  - DynamoDB (hot data, agent sessions)
+  - Pinecone/Weaviate (vector embeddings)
+  - TimescaleDB 2.20.0 (time-series analytics)
+- **Cache**: Redis 7.4 with cluster mode
+- **Media**: Membrane Framework 1.2.3
 - **Container**: Docker with multi-stage builds
 - **Orchestration**: ECS Fargate with auto-scaling
+- **Storage**: S3 with intelligent tiering
 
-#### AI/ML Stack (Enhanced)
+#### AI/ML Stack (Claude 4 Enhanced)
 - **LLM**: Amazon Bedrock
-  - Claude 3.7 Sonnet (anthropic.claude-3-7-sonnet-20250219-v1:0) - Latest with extended thinking
-  - Claude 3.5 Sonnet v2 (anthropic.claude-3-5-sonnet-20241022-v2:0) - Balanced performance
-  - Claude 3.5 Haiku (anthropic.claude-3-5-haiku-20241022-v1:0) - Fastest intelligence
-  - Claude 3 Haiku (anthropic.claude-3-haiku-20240307-v1:0) - Most cost-effective
-- **STT**: Deepgram Nova-3 (54% accuracy improvement, multilingual)
-- **TTS**: Deepgram Aura-2 (context-aware, natural speech)
+  - Claude 4 Opus (anthropic.claude-4-opus-20250120) - Extended thinking, tool calling
+  - Claude 4 Sonnet (anthropic.claude-4-sonnet-20250120) - Balanced with parallel tools
+  - Claude 3.5 Sonnet v2 (anthropic.claude-3-5-sonnet-20241022-v2:0) - Production workhorse
+  - Claude 3.5 Haiku (anthropic.claude-3-5-haiku-20241022-v1:0) - Ultra-low latency
+  - Claude 3 Haiku (anthropic.claude-3-haiku-20240307-v1:0) - Cost-effective
+- **STT**: Deepgram Nova-3 (54% accuracy improvement, <50ms latency)
+- **TTS**: Deepgram Aura-2 (context-aware, <20ms streaming)
+- **Agent Capabilities**:
+  - Extended thinking mode (1024-64000 token budget)
+  - Parallel tool execution via Converse API
+  - Tool calling with function definitions
+  - Memory management (DynamoDB + Redis)
+  - Knowledge search (AWS Kendra/OpenSearch)
+  - Code execution (via Lambda integration)
+  - Prompt caching (5-minute TTL, 90% cost reduction)
 
 ## Detailed Component Architecture
 
@@ -269,6 +284,109 @@ export default {
 - Data loss prevention
 - Incident response automation
 
+#### 9. Billing & Payment Service
+**Purpose**: Comprehensive billing, invoicing, and payment processing
+
+**Key Components**:
+- **Usage Metering Service**: Real-time resource tracking (TimescaleDB)
+- **Invoice Generator**: Automated invoice creation and PDF generation
+- **Payment Processor**: Stripe integration for card/ACH payments
+- **Credit Manager**: Credit limits and prepaid balance management
+- **Tax Calculator**: Multi-jurisdiction tax calculation
+- **Billing Analytics**: Revenue forecasting and churn analysis
+
+**Features**:
+- Postpaid and prepaid billing models
+- Usage-based pricing with real-time metering
+- Multi-currency support
+- Automated dunning and collection
+- Partner commission tracking
+
+#### 10. Identity & SSO Service
+**Purpose**: Enterprise identity management and single sign-on
+
+**Key Components**:
+- **SSO Provider Manager**: SAML 2.0, OIDC, Azure AD, Okta integration
+- **Session Manager**: Distributed session management with Redis
+- **MFA Engine**: TOTP, SMS, WebAuthn support
+- **User Provisioning**: JIT and SCIM provisioning
+- **Device Trust**: Device fingerprinting and trust scoring
+
+**Features**:
+- Enterprise SSO with major providers
+- Passwordless authentication options
+- Risk-based authentication
+- Session security monitoring
+- Login anomaly detection
+
+#### 11. Compliance & KYC Service
+**Purpose**: Business verification and regulatory compliance
+
+**Key Components**:
+- **KYC Verification Engine**: Integration with Jumio, Onfido, Trulioo
+- **Document Processor**: OCR and document verification
+- **Sanctions Screening**: Real-time PEP and sanctions checks
+- **Compliance Workflow**: Automated compliance processes
+- **Audit Trail Manager**: Immutable compliance records
+
+**Features**:
+- Automated business verification
+- Global sanctions screening
+- Document authenticity verification
+- Risk scoring and assessment
+- Regulatory reporting automation
+
+#### 12. Quality Management Service
+**Purpose**: AI-powered call quality scoring and analytics
+
+**Key Components**:
+- **Quality Scorer**: ML-based conversation quality assessment
+- **Performance Tracker**: Agent performance metrics
+- **Feedback Collector**: Multi-channel feedback collection
+- **Coaching Engine**: AI-driven improvement recommendations
+- **Benchmark Manager**: Industry benchmark comparisons
+
+**Features**:
+- Real-time quality scoring
+- Automated coaching recommendations
+- Customer satisfaction prediction
+- Compliance violation detection
+- Performance trend analysis
+
+#### 13. Feature Management Service
+**Purpose**: Feature flags and controlled rollouts
+
+**Key Components**:
+- **Flag Manager**: Feature flag CRUD and versioning
+- **Rollout Controller**: Percentage and targeted rollouts
+- **A/B Test Engine**: Statistical experiment management
+- **Configuration Server**: Real-time configuration updates
+- **Impact Analyzer**: Feature impact measurement
+
+**Features**:
+- Gradual feature rollouts
+- User segment targeting
+- Real-time flag evaluation
+- Rollback capabilities
+- Performance impact monitoring
+
+#### 14. Partner Management Service
+**Purpose**: Reseller and partner ecosystem management
+
+**Key Components**:
+- **Partner Portal**: Self-service partner management
+- **Commission Calculator**: Multi-tier commission tracking
+- **Organization Manager**: Partner-organization relationships
+- **Revenue Share Engine**: Automated revenue distribution
+- **Partner Analytics**: Performance dashboards
+
+**Features**:
+- Multi-tier partner programs
+- White-label capabilities
+- Commission automation
+- Partner performance tracking
+- Co-marketing support
+
 ## Data Flow Architecture (Hybrid)
 
 ### 1. Enhanced Inbound Call Flow
@@ -361,12 +479,49 @@ AybizaSupervisor
 │   ├── AnalyticsEngine
 │   ├── ReportingInterface
 │   └── QualityScorer
-└── SecuritySupervisor
-    ├── AuthenticationManager
-    ├── AuthorizationManager
-    ├── AuditLogger
-    ├── PIIDetector
-    └── EncryptionManager
+├── SecuritySupervisor
+│   ├── AuthenticationManager
+│   ├── AuthorizationManager
+│   ├── AuditLogger
+│   ├── PIIDetector
+│   └── EncryptionManager
+├── BillingSupervisor
+│   ├── UsageMeteringService
+│   ├── InvoiceGenerator
+│   ├── PaymentProcessor
+│   ├── CreditManager
+│   ├── TaxCalculator
+│   └── BillingAnalytics
+├── IdentitySupervisor
+│   ├── SSOProviderManager
+│   ├── SessionManager
+│   ├── MFAEngine
+│   ├── UserProvisioning
+│   └── DeviceTrust
+├── ComplianceSupervisor
+│   ├── KYCVerificationEngine
+│   ├── DocumentProcessor
+│   ├── SanctionsScreening
+│   ├── ComplianceWorkflow
+│   └── AuditTrailManager
+├── QualityManagementSupervisor
+│   ├── QualityScorer
+│   ├── PerformanceTracker
+│   ├── FeedbackCollector
+│   ├── CoachingEngine
+│   └── BenchmarkManager
+├── FeatureManagementSupervisor
+│   ├── FlagManager
+│   ├── RolloutController
+│   ├── ABTestEngine
+│   ├── ConfigurationServer
+│   └── ImpactAnalyzer
+└── PartnerManagementSupervisor
+    ├── PartnerPortal
+    ├── CommissionCalculator
+    ├── OrganizationManager
+    ├── RevenueShareEngine
+    └── PartnerAnalytics
 ```
 
 ## Scalability and Performance
@@ -494,4 +649,245 @@ Cost Per Call:
 - Reserved capacity for predictable workloads
 - Spot instances for non-critical environments
 
-This updated system architecture document reflects the current hybrid Cloudflare+AWS implementation with the latest technology stack, enhanced features, and enterprise-grade capabilities.
+## Billion-Scale Architecture Components
+
+### Account & Identity System
+**Purpose**: Simplify support interactions with easy-to-communicate identifiers
+
+```elixir
+defmodule Aybiza.Identity.AccountManager do
+  @doc """
+  Generate unique account ID for organizations
+  Format: AYB-XXXX-XXXX-XXXX (alphanumeric)
+  """
+  def generate_account_id do
+    segments = for _ <- 1..3 do
+      :crypto.strong_rand_bytes(2)
+      |> Base.encode32(padding: false)
+      |> String.slice(0..3)
+    end
+    
+    "AYB-#{Enum.join(segments, "-")}"
+  end
+  
+  @doc """
+  Generate user ID within organization
+  Format: USR-XXXXXXXXXX
+  """
+  def generate_user_id do
+    random = :crypto.strong_rand_bytes(5)
+    |> Base.encode32(padding: false)
+    |> String.slice(0..9)
+    
+    "USR-#{random}"
+  end
+end
+```
+
+### Claude 4 Agent Orchestration
+**Purpose**: Manage advanced agent capabilities with billion-scale efficiency
+
+```elixir
+defmodule Aybiza.Agents.Claude4Orchestrator do
+  @model_selector Aybiza.Agents.ModelSelector
+  @tool_executor Aybiza.Agents.ToolExecutor
+  
+  @doc """
+  Intelligent model selection based on context
+  """
+  def select_model_for_context(context) do
+    cond do
+      # Extended thinking for complex reasoning
+      context.requires_extended_thinking ->
+        {:claude_opus_4, max_thinking_time: 30_000}
+      
+      # Code execution or data analysis
+      context.requires_code_execution ->
+        {:claude_opus_4, enable_code_tool: true}
+      
+      # Multiple tool calls needed
+      length(context.required_tools) > 1 ->
+        {:claude_sonnet_4, parallel_tools: true}
+      
+      # Real-time voice response needed
+      context.latency_requirement < 100 ->
+        {:claude_haiku_3_5, cache_enabled: true}
+      
+      # Default to Sonnet 4 for balanced performance
+      true ->
+        {:claude_sonnet_4, standard_config: true}
+    end
+  end
+  
+  @doc """
+  Handle voice interaction with tool execution
+  """
+  def handle_voice_turn(agent, user_input, call_context) do
+    # 1. Select appropriate model
+    model_config = select_model_for_context(call_context)
+    
+    # 2. Check prompt cache
+    cache_key = generate_cache_key(agent.id, user_input)
+    case PromptCache.get(cache_key) do
+      {:hit, cached_response} ->
+        {:cached, cached_response}
+      
+      :miss ->
+        # 3. Process with selected model
+        response = process_with_model(agent, user_input, model_config)
+        
+        # 4. Handle tool execution if needed
+        case response.tool_calls do
+          [] -> 
+            {:direct, response}
+          
+          tools when length(tools) > 1 ->
+            # Acknowledge and execute in parallel
+            speak("Let me check a few things for you...")
+            execute_parallel_tools(tools, call_context)
+          
+          [single_tool] ->
+            # Execute single tool
+            speak("I'll look that up for you...")
+            execute_tool(single_tool, call_context)
+        end
+    end
+  end
+end
+```
+
+### Hybrid Storage Layer
+**Purpose**: Optimize data access for billion-scale operations
+
+```elixir
+defmodule Aybiza.Storage.HybridManager do
+  @doc """
+  Store agent session with appropriate storage tier
+  """
+  def store_agent_session(session_data) do
+    # Hot data to DynamoDB
+    DynamoDB.put_item("AgentSessions", %{
+      agent_session_id: session_data.id,
+      tenant_id: session_data.tenant_id,
+      session_state: session_data.state,
+      ttl: System.system_time(:second) + 3600
+    })
+    
+    # Structured data to PostgreSQL
+    %AgentSession{}
+    |> AgentSession.changeset(session_data)
+    |> Repo.insert()
+    
+    # Vector embeddings to Pinecone
+    if session_data.memory_update do
+      Pinecone.upsert_vectors(
+        session_data.tenant_id,
+        session_data.memory_vectors
+      )
+    end
+  end
+  
+  @doc """
+  Retrieve with fallback strategy
+  """
+  def get_agent_context(agent_id, tenant_id) do
+    # Try hot storage first
+    with {:error, :not_found} <- get_from_dynamodb(agent_id),
+         {:error, :not_found} <- get_from_redis(agent_id),
+         {:error, :not_found} <- get_from_postgres(agent_id, tenant_id) do
+      {:error, :not_found}
+    else
+      {:ok, source, data} -> {:ok, source, data}
+    end
+  end
+end
+```
+
+### Consent Management System
+**Purpose**: Ensure compliance for outbound calls at scale
+
+```elixir
+defmodule Aybiza.Compliance.ConsentManager do
+  @doc """
+  Verify consent before outbound call
+  """
+  def verify_outbound_consent(phone_number, tenant_id, consent_type) do
+    query = """
+    SELECT consent_status, expires_at, verification_method
+    FROM consent_records
+    WHERE tenant_id = $1 
+      AND phone_number = $2 
+      AND consent_type = $3
+      AND consent_status = 'opted_in'
+      AND (expires_at IS NULL OR expires_at > NOW())
+    ORDER BY opted_in_at DESC
+    LIMIT 1
+    """
+    
+    case Repo.one(query, [tenant_id, phone_number, consent_type]) do
+      nil -> 
+        {:error, :no_consent}
+      
+      %{expires_at: exp} when not is_nil(exp) and exp < DateTime.utc_now() ->
+        {:error, :consent_expired}
+      
+      consent ->
+        {:ok, consent}
+    end
+  end
+  
+  @doc """
+  Record new consent with verification
+  """
+  def record_consent(consent_params) do
+    %ConsentRecord{}
+    |> ConsentRecord.changeset(consent_params)
+    |> validate_phone_number()
+    |> validate_consent_type()
+    |> Repo.insert()
+    |> broadcast_consent_update()
+  end
+end
+```
+
+### Performance Monitoring at Scale
+**Purpose**: Track billions of interactions efficiently
+
+```elixir
+defmodule Aybiza.Monitoring.BillionScale do
+  use GenServer
+  
+  @doc """
+  Aggregate metrics with minimal overhead
+  """
+  def record_call_metrics(call_data) do
+    # Write to TimescaleDB for analytics
+    %DetailedMetric{
+      timestamp: DateTime.utc_now(),
+      call_sid: call_data.sid,
+      tenant_id: call_data.tenant_id,
+      metric_type: "latency",
+      metric_name: "total_response_time",
+      metric_value: call_data.total_latency_ms
+    }
+    |> Repo.insert_async()
+    
+    # Update real-time dashboards via Redis
+    Redis.command(["HINCRBY", "metrics:#{call_data.tenant_id}", "calls", 1])
+    Redis.command(["HINCRBYFLOAT", "metrics:#{call_data.tenant_id}", "total_latency", call_data.total_latency_ms])
+    
+    # Alert if latency exceeds threshold
+    if call_data.total_latency_ms > 100 do
+      AlertManager.trigger(:high_latency, call_data)
+    end
+  end
+end
+```
+
+This enhanced system architecture supports:
+- **Billion-scale operations** with hybrid storage and intelligent routing
+- **Claude 4 integration** with extended thinking and parallel tools
+- **Account ID system** for easy support interactions
+- **Consent management** for compliant outbound calling
+- **Cost optimization** through intelligent caching and model selection
+- **Real-time monitoring** of billions of concurrent interactions

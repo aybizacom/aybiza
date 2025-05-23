@@ -3,12 +3,59 @@
 ## Overview
 This document provides a comprehensive implementation guide for Claude models on AWS Bedrock within the AYBIZA hybrid Cloudflare+AWS architecture. We leverage the latest Claude models (including Claude 3.7 Sonnet with extended thinking) for optimal performance, ultra-low latency, and enterprise-grade voice interactions.
 
+**Important Note**: This implementation uses the `aws-elixir` library for AWS SDK functionality, NOT `ex_aws`. The `aws-elixir` library provides better support for newer AWS services like Bedrock and its Converse API.
+
 ## Available Claude Models on AWS Bedrock (Updated 2025)
 
 ### Model Selection Strategy
 
-#### 1. Claude 3.7 Sonnet (Latest & Most Advanced - February 2025)
-- **Model ID**: `anthropic.claude-3-7-sonnet-20250219-v1:0`
+#### 1. Claude 4 Opus (Most Advanced - January 2025)
+- **Model ID**: `anthropic.claude-4-opus-20250120`
+- **Purpose**: Extended thinking, code execution, complex reasoning
+- **Context Window**: 200K tokens
+- **Max Output**: 64,000 tokens
+- **Pricing**: $15.00/MTok input, $75.00/MTok output
+- **Key Features**:
+  - **Extended Thinking**: Token budget (1024-64000 tokens) - available on Bedrock
+  - **Parallel Tool Use**: Execute multiple tools concurrently
+  - **Tool Calling**: Full support via Bedrock Converse API
+  - **Prompt Caching**: 5-minute default TTL (90% cost reduction)
+  - **Code Execution**: Limited support (use Lambda integration)
+  - **MCP Connectors**: Not yet available on Bedrock
+  - **Files API**: Use S3 integration as alternative
+- **Performance**:
+  - First Token Latency: ~300-500ms (standard), +5-30s (extended thinking)
+  - Best for: Complex analysis, code generation, multi-tool workflows
+- **Voice Agent Use Cases**:
+  - Technical support with code debugging
+  - Complex data analysis during calls
+  - Multi-system integration tasks
+  - Advanced problem-solving scenarios
+
+#### 2. Claude 4 Sonnet (Balanced Performance - January 2025)
+- **Model ID**: `anthropic.claude-4-sonnet-20250120`
+- **Purpose**: Standard queries with parallel tool execution
+- **Context Window**: 200K tokens
+- **Max Output**: 32,000 tokens
+- **Pricing**: $3.00/MTok input, $15.00/MTok output
+- **Key Features**:
+  - **Parallel Tools**: Execute multiple tools concurrently via Bedrock
+  - **Smart Caching**: 5-minute default prompt cache
+  - **Enhanced Speed**: Optimized for <200ms responses
+  - **Tool Calling**: Full support via Bedrock Converse API
+  - **Web Search**: Use AWS Kendra or OpenSearch integration
+  - **MCP Support**: Not yet available on Bedrock
+- **Performance**:
+  - First Token Latency: ~150-200ms
+  - Best for: Standard voice interactions with tool use
+- **Voice Agent Use Cases**:
+  - Customer service with CRM lookups
+  - Real-time order processing
+  - Multi-step workflows
+  - Information retrieval tasks
+
+#### 3. Claude 3.5 Sonnet v2 (Primary Production Model - October 2024)
+- **Model ID**: `anthropic.claude-3-5-sonnet-20241022-v2:0`
 - **Purpose**: Complex reasoning with toggleable extended thinking
 - **Context Window**: 200K tokens
 - **Max Output**: 64,000 tokens
@@ -29,8 +76,8 @@ This document provides a comprehensive implementation guide for Claude models on
   - Strategic consultation requiring deep analysis
   - Advanced conversation context understanding
 
-#### 2. Claude 3.5 Sonnet v2 (Primary Production Model - October 2024)
-- **Model ID**: `anthropic.claude-3-5-sonnet-20241022-v2:0`
+#### 4. Claude 3.5 Haiku (Fastest Intelligence - October 2024)
+- **Model ID**: `anthropic.claude-3-5-haiku-20241022-v1:0`
 - **Purpose**: Main workhorse for voice interactions
 - **Context Window**: 200K tokens
 - **Max Output**: 8,192 tokens
@@ -51,8 +98,8 @@ This document provides a comprehensive implementation guide for Claude models on
   - Tool-based workflow automation
   - Complex but time-sensitive interactions
 
-#### 3. Claude 3.5 Haiku (Fastest Intelligence - October 2024)
-- **Model ID**: `anthropic.claude-3-5-haiku-20241022-v1:0`
+#### 5. Claude 3 Haiku (Most Cost-Effective - March 2024)
+- **Model ID**: `anthropic.claude-3-haiku-20240307-v1:0`
 - **Purpose**: Ultra-fast responses with significantly improved intelligence
 - **Context Window**: 200K tokens
 - **Max Output**: 8,192 tokens
@@ -72,8 +119,6 @@ This document provides a comprehensive implementation guide for Claude models on
   - High-volume customer interactions
   - Real-time conversation flows requiring speed
 
-#### 4. Claude 3 Haiku (Most Cost-Effective - March 2024)
-- **Model ID**: `anthropic.claude-3-haiku-20240307-v1:0`
 - **Purpose**: High-volume, simple interactions
 - **Context Window**: 200K tokens
 - **Max Output**: 4,096 tokens
@@ -104,9 +149,9 @@ AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
 AWS_REGION=us-east-1  # Primary region
 AWS_FALLBACK_REGION=us-west-2  # Fallback region
 
-# Multi-Region Model Configuration
-AWS_BEDROCK_MODELS="anthropic.claude-3-7-sonnet-20250219-v1:0,anthropic.claude-3-5-sonnet-20241022-v2:0,anthropic.claude-3-5-haiku-20241022-v1:0,anthropic.claude-3-haiku-20240307-v1:0"
-AWS_DEFAULT_BEDROCK_MODEL=anthropic.claude-3-5-sonnet-20241022-v2:0
+# Multi-Region Model Configuration with Claude 4
+AWS_BEDROCK_MODELS="anthropic.claude-4-opus-20250120,anthropic.claude-4-sonnet-20250120,anthropic.claude-3-5-sonnet-20241022-v2:0,anthropic.claude-3-5-haiku-20241022-v1:0,anthropic.claude-3-haiku-20240307-v1:0"
+AWS_DEFAULT_BEDROCK_MODEL=anthropic.claude-4-sonnet-20250120
 
 # Performance Optimization Settings
 LATENCY_THRESHOLD_MS=200
@@ -131,22 +176,40 @@ defmodule Aybiza.AWS.BedrockClient do
   
   use GenServer
   require Logger
+  alias AWS.Client
+  alias AWS.BedrockRuntime
   
-  # Latest Claude model constants
-  @claude_3_7_sonnet "anthropic.claude-3-7-sonnet-20250219-v1:0"
+  # Latest Claude model constants including Claude 4
+  @claude_4_opus "anthropic.claude-4-opus-20250120"
+  @claude_4_sonnet "anthropic.claude-4-sonnet-20250120"
   @claude_3_5_sonnet "anthropic.claude-3-5-sonnet-20241022-v2:0"
   @claude_3_5_haiku "anthropic.claude-3-5-haiku-20241022-v1:0"
   @claude_3_haiku "anthropic.claude-3-haiku-20240307-v1:0"
   
   @model_capabilities %{
-    @claude_3_7_sonnet => %{
+    @claude_4_opus => %{
       intelligence: 10,
-      speed: 6,
+      speed: 4,
+      cost: 5,
+      extended_thinking: true,
+      parallel_tools: true,
+      code_execution: false,  # Use Lambda integration
+      mcp_support: false,  # Not yet on Bedrock
+      files_api: false,  # Use S3 integration,
+      prompt_caching: true,
+      max_tokens: 64000
+    },
+    @claude_4_sonnet => %{
+      intelligence: 9,
+      speed: 7,
       cost: 1,
       extended_thinking: true,
-      tool_use: true,
-      vision: true,
-      max_tokens: 64000
+      parallel_tools: true,  # No specific limit documented
+      code_execution: false,  # Not on Bedrock
+      mcp_support: false,  # Not on Bedrock
+      files_api: false,  # Not on Bedrock
+      prompt_caching: true,  # 5-min default
+      max_tokens: 32000
     },
     @claude_3_5_sonnet => %{
       intelligence: 9,
@@ -235,7 +298,7 @@ defmodule Aybiza.AWS.BedrockClient do
     model_id = cond do
       # Extended thinking for very complex queries
       complexity > 0.9 && latency_requirement > 1000 ->
-        @claude_3_7_sonnet
+        @claude_4_opus
       
       # Ultra-fast responses for simple queries
       complexity < 0.3 && latency_requirement < 150 ->
@@ -294,8 +357,8 @@ defmodule Aybiza.AWS.BedrockClient do
       base_payload
     end
     
-    # Add extended thinking for Claude 3.7 Sonnet
-    if model_id == @claude_3_7_sonnet && options[:extended_thinking] do
+    # Add extended thinking for Claude 4 models
+    if model_id in [@claude_4_opus, @claude_4_sonnet] && options[:extended_thinking] do
       thinking_budget = Map.get(options, :thinking_budget, 5000)
       Map.merge(base_payload, %{
         "thinking" => true,
@@ -551,12 +614,13 @@ defmodule Aybiza.AWS.BedrockClient do
   end
   
   defp supports_tool_use?(model_id) do
-    model_id in [@claude_3_7_sonnet, @claude_3_5_sonnet]
+    model_id in [@claude_4_opus, @claude_4_sonnet, @claude_3_5_sonnet]
   end
   
   defp determine_max_tokens(model_id, options) do
     default_max = case model_id do
-      @claude_3_7_sonnet -> 2048  # Conservative for voice, can go up to 64K
+      @claude_4_opus -> 4096      # Extended responses, can go up to 64K
+      @claude_4_sonnet -> 2048    # Balanced responses, can go up to 32K
       @claude_3_5_sonnet -> 1024  # Conservative for voice
       @claude_3_5_haiku -> 512   # Fast responses
       @claude_3_haiku -> 256     # Simple responses
@@ -594,14 +658,15 @@ defmodule Aybiza.AWS.BedrockClient do
     thinking_tokens = get_thinking_tokens(response)
     
     costs = case model_id do
-      @claude_3_7_sonnet -> %{input: 3.00, output: 15.00}
+      @claude_4_opus -> %{input: 15.00, output: 75.00}
+      @claude_4_sonnet -> %{input: 3.00, output: 15.00}
       @claude_3_5_sonnet -> %{input: 3.00, output: 15.00}
       @claude_3_5_haiku -> %{input: 0.80, output: 4.00}
       @claude_3_haiku -> %{input: 0.25, output: 1.25}
     end
     
-    input_cost = (input_tokens / 1000) * costs.input
-    output_cost = ((output_tokens + thinking_tokens) / 1000) * costs.output
+    input_cost = (input_tokens / 1_000_000) * costs.input
+    output_cost = ((output_tokens + thinking_tokens) / 1_000_000) * costs.output
     
     input_cost + output_cost
   end
@@ -1060,6 +1125,590 @@ defmodule Aybiza.VoiceAgent.CircuitBreaker do
   
   defp via_tuple(model_id) do
     {:via, Registry, {Aybiza.VoiceAgent.CircuitBreakerRegistry, model_id}}
+  end
+end
+```
+
+## Tool Calling Implementation on AWS Bedrock
+
+### 1. Native Tool Support via Converse API
+```elixir
+defmodule Aybiza.Bedrock.ToolCalling do
+  @moduledoc """
+  Implements tool calling for Claude 4 on AWS Bedrock using Converse API
+  """
+  
+  def call_with_tools(prompt, available_tools, context \\ %{}) do
+    # Format tools for Bedrock Converse API
+    tool_specs = Enum.map(available_tools, &format_tool_for_bedrock/1)
+    
+    request = %{
+      "modelId" => get_model_for_tools(context),
+      "messages" => [
+        %{
+          "role" => "user",
+          "content" => [%{"text" => prompt}]
+        }
+      ],
+      "toolConfig" => %{
+        "tools" => tool_specs,
+        "toolChoice" => %{"auto" => %{}}  # Let Claude decide
+      },
+      "inferenceConfig" => %{
+        "maxTokens" => 4096,
+        "temperature" => 0.0  # Deterministic for tools
+      }
+    }
+    
+    # Make the request
+    # Using aws_elixir or custom client for Bedrock
+    case AWS.Client.post(client(), "/model/#{model_id}/converse", Jason.encode!(request)) do
+      {:ok, %{status: 200, body: body}} -> 
+        response = Jason.decode!(body)
+        handle_tool_response(response, available_tools)
+      {:error, error} -> 
+        {:error, error}
+    end
+  end
+  
+  defp format_tool_for_bedrock(tool) do
+    %{
+      "toolSpec" => %{
+        "name" => tool.name,
+        "description" => tool.description,
+        "inputSchema" => %{
+          "json" => tool.parameters
+        }
+      }
+    }
+  end
+  
+  defp handle_tool_response(response, available_tools) do
+    case response["output"]["message"]["content"] do
+      [%{"toolUse" => tool_use} | _] ->
+        # Execute the requested tool
+        execute_tool(tool_use, available_tools)
+      
+      [%{"text" => text} | _] ->
+        # Direct text response
+        {:ok, text}
+    end
+  end
+  
+  defp execute_tool(tool_use, available_tools) do
+    tool_name = tool_use["name"]
+    tool_input = tool_use["input"]
+    
+    # Find and execute the tool
+    case Enum.find(available_tools, &(&1.name == tool_name)) do
+      nil -> {:error, "Tool not found: #{tool_name}"}
+      tool -> tool.execute.(tool_input)
+    end
+  end
+end
+```
+
+### 2. Memory Implementation for Voice Agents
+```elixir
+defmodule Aybiza.Bedrock.ConversationMemory do
+  @moduledoc """
+  Implements conversation memory for Claude agents on Bedrock
+  Uses DynamoDB for persistence and Redis for fast access
+  """
+  
+  use GenServer
+  
+  @memory_ttl 3600  # 1 hour
+  @max_conversation_length 50  # messages
+  
+  def remember_conversation(call_id, message) do
+    GenServer.cast(via_tuple(call_id), {:add_message, message})
+  end
+  
+  def get_conversation_context(call_id, options \\ %{}) do
+    GenServer.call(via_tuple(call_id), {:get_context, options})
+  end
+  
+  def build_messages_with_memory(prompt, call_id) do
+    context = get_conversation_context(call_id)
+    
+    # Build message history for Claude
+    messages = Enum.map(context.history, fn msg ->
+      %{
+        "role" => msg.role,
+        "content" => [%{"text" => msg.content}]
+      }
+    end)
+    
+    # Add current message
+    messages ++ [%{
+      "role" => "user",
+      "content" => [%{"text" => prompt}]
+    }]
+  end
+  
+  # GenServer implementation
+  def init(call_id) do
+    # Load from cache or database
+    state = load_conversation_state(call_id)
+    
+    # Schedule periodic persistence
+    Process.send_after(self(), :persist, 10_000)
+    
+    {:ok, state}
+  end
+  
+  def handle_cast({:add_message, message}, state) do
+    new_message = %{
+      role: message.role,
+      content: message.content,
+      timestamp: DateTime.utc_now(),
+      metadata: message.metadata
+    }
+    
+    # Add to history with sliding window
+    new_history = [new_message | state.history]
+                  |> Enum.take(@max_conversation_length)
+    
+    # Update state
+    new_state = %{state | 
+      history: new_history,
+      last_updated: DateTime.utc_now()
+    }
+    
+    # Cache in Redis for fast access
+    cache_conversation(state.call_id, new_state)
+    
+    {:noreply, new_state}
+  end
+  
+  def handle_call({:get_context, options}, _from, state) do
+    # Apply filters if needed
+    context = %{
+      history: filter_history(state.history, options),
+      summary: state.summary,
+      metadata: state.metadata
+    }
+    
+    {:reply, context, state}
+  end
+  
+  defp filter_history(history, %{last_n: n}) do
+    Enum.take(history, n)
+  end
+  
+  defp filter_history(history, %{since: timestamp}) do
+    Enum.take_while(history, &(&1.timestamp > timestamp))
+  end
+  
+  defp filter_history(history, _), do: history
+end
+```
+
+### 3. Advanced Tool Examples for Voice
+```elixir
+defmodule Aybiza.Tools.VoiceAgentTools do
+  @moduledoc """
+  Common tools for voice agents using Claude 4 on Bedrock
+  """
+  
+  def available_tools() do
+    [
+      crm_lookup_tool(),
+      appointment_booking_tool(),
+      knowledge_base_search_tool(),
+      email_sender_tool(),
+      call_transfer_tool()
+    ]
+  end
+  
+  defp crm_lookup_tool() do
+    %{
+      name: "lookup_customer",
+      description: "Look up customer information in the CRM system",
+      parameters: %{
+        "type" => "object",
+        "properties" => %{
+          "customer_id" => %{
+            "type" => "string",
+            "description" => "Customer ID or phone number"
+          },
+          "fields" => %{
+            "type" => "array",
+            "items" => %{"type" => "string"},
+            "description" => "Specific fields to retrieve"
+          }
+        },
+        "required" => ["customer_id"]
+      },
+      execute: fn params ->
+        # Integration with actual CRM
+        customer_data = CRMClient.lookup(params["customer_id"], params["fields"])
+        {:ok, format_customer_data(customer_data)}
+      end
+    }
+  end
+  
+  defp knowledge_base_search_tool() do
+    %{
+      name: "search_knowledge",
+      description: "Search company knowledge base for information",
+      parameters: %{
+        "type" => "object",
+        "properties" => %{
+          "query" => %{
+            "type" => "string",
+            "description" => "Search query"
+          },
+          "category" => %{
+            "type" => "string",
+            "description" => "Optional category filter"
+          }
+        },
+        "required" => ["query"]
+      },
+      execute: fn params ->
+        # Use AWS Kendra or OpenSearch
+        results = search_knowledge_base(params["query"], params["category"])
+        {:ok, format_search_results(results)}
+      end
+    }
+  end
+end
+```
+
+## Claude 4 Specific Implementation
+
+### 1. Extended Thinking Mode
+```elixir
+defmodule Aybiza.Bedrock.ExtendedThinking do
+  @moduledoc """
+  Implements Claude 4's extended thinking capabilities for voice agents
+  """
+  
+  def process_with_extended_thinking(prompt, context, options \\ %{}) do
+    # Configure for extended thinking (uses token budget, not time)
+    # Note: Extended thinking may require additional model parameters
+    thinking_budget = options[:thinking_budget] || 32_000
+    
+    # Build request with thinking mode
+    request = %{
+      "modelId" => "anthropic.claude-4-opus-20250120",
+      "messages" => format_messages_with_context(prompt, context),
+      "system" => build_thinking_system_prompt(context),
+      "inferenceConfig" => %{
+        "maxTokens" => 8000,
+        "temperature" => 0.1  # Lower for more focused thinking
+      },
+      "additionalModelRequestFields" => %{
+        "thinking_enabled" => true,
+        "thinking_budget_tokens" => thinking_budget
+      }
+    }
+    
+    # Acknowledge to user during thinking
+    send_to_voice("Let me think about that for a moment...")
+    
+    # Process with streaming
+    stream_extended_thinking_response(request, context)
+  end
+  
+  defp stream_extended_thinking_response(request, context) do
+    # Using streaming with aws_elixir or custom client
+    AWS.Client.post_stream(client(), "/model/#{model_id}/converse-stream", Jason.encode!(request))
+    |> Stream.transform(%{thinking: true, buffer: ""}, fn chunk, acc ->
+      case chunk do
+        %{"thinking" => thinking_content} ->
+          # Log thinking process but don't send to user
+          Logger.debug("Claude thinking: #{thinking_content}")
+          {[], acc}
+        
+        %{"content" => content} ->
+          # Actual response - send to voice
+          {[%{type: :response, text: content}], %{acc | thinking: false}}
+        
+        _ -> {[], acc}
+      end
+    end)
+  end
+end
+```
+
+### 2. Parallel Tool Execution
+```elixir
+defmodule Aybiza.Bedrock.ParallelTools do
+  @moduledoc """
+  Implements Claude 4's parallel tool execution for voice agents
+  """
+  
+  def execute_tools_in_parallel(tool_requests, context) do
+    # Acknowledge tool execution
+    acknowledgment = get_natural_acknowledgment(tool_requests)
+    send_to_voice(acknowledgment)
+    
+    # Configure for parallel execution
+    tool_config = %{
+      "toolConfig" => %{
+        "tools" => format_available_tools(context),
+        "toolChoice" => %{"type" => "auto"},
+        # No documented limit on parallel tools
+        "maxParallelTools" => 20  # Conservative limit
+      }
+    }
+    
+    # Execute with Claude 4 Sonnet for speed
+    request = %{
+      "modelId" => "anthropic.claude-sonnet-4-20250514-v1:0",
+      "messages" => build_tool_messages(tool_requests),
+      "system" => "Execute the requested tools efficiently and return results.",
+      "inferenceConfig" => %{
+        "maxTokens" => 4000,
+        "temperature" => 0.0  # Deterministic for tools
+      }
+    }
+    |> Map.merge(tool_config)
+    
+    # Process tool results
+    AWS.BedrockRuntime.converse(client(), request)
+    |> handle_parallel_tool_results(context)
+  end
+  
+  defp get_natural_acknowledgment(tool_requests) when length(tool_requests) > 3 do
+    "I'll need to check several things for you. Give me just a moment..."
+  end
+  
+  defp get_natural_acknowledgment(tool_requests) when length(tool_requests) > 1 do
+    "Let me look up a couple of things for you..."
+  end
+  
+  defp get_natural_acknowledgment([tool]) do
+    case tool.name do
+      "search_web" -> "Let me search for that information..."
+      "execute_code" -> 
+        Logger.warn("Code execution not available on Bedrock")
+        "Let me calculate that for you..."
+      "query_database" -> "Let me check our records..."
+      _ -> "Let me get that for you..."
+    end
+  end
+end
+```
+
+### 3. Prompt Caching Implementation
+```elixir
+defmodule Aybiza.Bedrock.PromptCache do
+  @moduledoc """
+  Implements prompt caching for 90% cost reduction
+  Default: 5-minute TTL
+  Beta: 1-hour TTL (requires anthropic-beta: prompt-caching-2 header)
+  """
+  
+  use GenServer
+  
+  @cache_ttl 300_000  # 5 minutes default (1 hour requires beta header)
+  
+  def get_or_compute(cache_key, compute_fn) do
+    case get_from_cache(cache_key) do
+      {:ok, cached_response} ->
+        Logger.info("Prompt cache hit for key: #{cache_key}")
+        {:cached, cached_response}
+      
+      :miss ->
+        Logger.info("Prompt cache miss for key: #{cache_key}")
+        response = compute_fn.()
+        put_in_cache(cache_key, response)
+        {:computed, response}
+    end
+  end
+  
+  def build_cacheable_request(request) do
+    # Add cache control headers
+    Map.put(request, "cacheControl", %{
+      "enabled" => true,
+      "ttlSeconds" => 300,  # 5 minutes default
+      "cacheKey" => generate_cache_key(request)
+    })
+  end
+  
+  defp generate_cache_key(request) do
+    # Generate deterministic cache key
+    :crypto.hash(:sha256, :erlang.term_to_binary(request))
+    |> Base.encode16()
+    |> String.slice(0..15)
+  end
+end
+```
+
+### 4. MCP Connector Integration
+```elixir
+defmodule Aybiza.Bedrock.MCPIntegration do
+  @moduledoc """
+  MCP connector integration placeholder
+  NOTE: MCP is not available on AWS Bedrock
+  This module provides a fallback implementation
+  For true MCP support, use Anthropic API directly with beta header
+  """
+  
+  def register_mcp_connector(connector_type, config) do
+    connector = %{
+      "type" => "mcp_connector",
+      "name" => "#{connector_type}_connector",
+      "description" => "Connect to #{connector_type} for data access",
+      "inputSchema" => build_connector_schema(connector_type),
+      "executionEndpoint" => config.endpoint,
+      "authentication" => encrypt_credentials(config.credentials)
+    }
+    
+    # Register with Claude 4
+    update_available_tools(connector)
+  end
+  
+  def execute_mcp_query(connector_name, query, context) do
+    tool_request = %{
+      "toolUse" => %{
+        "name" => connector_name,
+        "input" => %{
+          "query" => query,
+          "context" => context
+        }
+      }
+    }
+    
+    # Execute through Claude 4 with MCP support
+    # IMPORTANT: MCP not available on AWS Bedrock - use alternative approach
+    Logger.warn("MCP connectors are not available on AWS Bedrock. Using tool-based alternative.")
+    
+    # Alternative implementation for Bedrock using standard tools
+    request = %{
+      "modelId" => "anthropic.claude-4-opus-20250120",
+      "messages" => [%{"role" => "user", "content" => "Execute query: #{query}"}],
+      "toolConfig" => %{
+        "tools" => []  # MCP not supported on Bedrock
+      }
+    }
+    
+    # Using aws_elixir or custom client
+    AWS.Client.post(client(), "/model/#{model_id}/converse", Jason.encode!(request))
+  end
+end
+```
+
+### 5. Code Execution Safety
+```elixir
+defmodule Aybiza.Bedrock.CodeExecution do
+  @moduledoc """
+  Safe code execution for Claude 4 agents during voice calls
+  """
+  
+  def execute_code_safely(code, language \\ "python") do
+    # Validate code safety
+    with :ok <- validate_code_safety(code),
+         :ok <- check_resource_limits(code) do
+      
+      # Execute in sandboxed environment
+      # Note: Python 3.11.12 environment with 1 GiB RAM, 5 GiB storage
+      sandbox_config = %{
+        "language" => "python",  # Only Python supported
+        "timeout" => 3000,
+        "memoryLimit" => "1GiB",  # Fixed limit
+        "storageLimit" => "5GiB",  # Fixed limit
+        "cpuLimit" => "1",  # Fixed to 1 CPU
+        "networkAccess" => false,
+        "fileSystemAccess" => "workspace"  # Limited to workspace
+      }
+      
+      # Send to Claude 4 for execution
+      # Use Lambda for code execution on Bedrock
+      request = %{
+        "modelId" => "anthropic.claude-4-opus-20250120",
+        "toolConfig" => %{
+          "tools" => [code_execution_tool_spec(sandbox_config)]
+        },
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => "Execute this code safely: ```python\n#{code}\n```"
+          }
+        ]
+      }
+      
+      # Using aws_elixir or custom client
+      AWS.Client.post(client(), "/model/#{model_id}/converse", Jason.encode!(request))
+      |> format_code_result()
+    end
+  end
+  
+  defp validate_code_safety(code) do
+    dangerous_patterns = [
+      ~r/import\s+(os|subprocess|socket)/,
+      ~r/eval\s*\(/,
+      ~r/exec\s*\(/,
+      ~r/__import__/
+    ]
+    
+    if Enum.any?(dangerous_patterns, &Regex.match?(&1, code)) do
+      {:error, "Code contains potentially unsafe operations"}
+    else
+      :ok
+    end
+  end
+end
+```
+
+### 6. Performance Monitoring for Claude 4
+```elixir
+defmodule Aybiza.Bedrock.Claude4Monitoring do
+  @moduledoc """
+  Specialized monitoring for Claude 4 features
+  """
+  
+  def track_claude4_metrics(operation, metadata \\ %{}) do
+    start_time = System.monotonic_time(:millisecond)
+    
+    result = yield()
+    
+    duration = System.monotonic_time(:millisecond) - start_time
+    
+    metrics = %{
+      operation: operation,
+      model: metadata.model || "claude-4",
+      duration_ms: duration,
+      thinking_tokens: metadata[:thinking_tokens],  # Extended thinking token usage
+      tools_executed: metadata[:tools_count] || 0,
+      cache_hit: metadata[:cache_hit] || false,
+      prompt_tokens: metadata[:prompt_tokens],
+      completion_tokens: metadata[:completion_tokens],
+      total_cost: calculate_claude4_cost(metadata)
+    }
+    
+    # Send to monitoring system
+    Telemetry.execute([:aybiza, :claude4, operation], metrics, metadata)
+    
+    # Alert if performance degrades
+    if duration > expected_duration(operation) * 1.5 do
+      AlertManager.send_performance_alert(operation, metrics)
+    end
+    
+    result
+  end
+  
+  defp calculate_claude4_cost(metadata) do
+    model_pricing = %{
+      "anthropic.claude-4-opus-20250120" => {15.00, 75.00},
+      "anthropic.claude-4-sonnet-20250120" => {3.00, 15.00}
+    }
+    
+    {input_price, output_price} = model_pricing[metadata.model] || {0, 0}
+    
+    input_cost = (metadata[:prompt_tokens] || 0) / 1_000_000 * input_price
+    output_cost = (metadata[:completion_tokens] || 0) / 1_000_000 * output_price
+    
+    # Apply caching discount
+    if metadata[:cache_hit] do
+      input_cost * 0.1 + output_cost  # 90% discount on input
+    else
+      input_cost + output_cost
+    end
   end
 end
 ```

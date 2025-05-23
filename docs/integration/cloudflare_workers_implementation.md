@@ -319,15 +319,31 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 }
 
 async function parseVoiceRequest(request) {
-  const url = new URL(request.url);
-  const userAgent = request.headers.get('User-Agent') || '';
-  
-  return {
-    type: determineRequestType(url.pathname),
-    priority: determinePriority(url.pathname, userAgent),
-    cacheable: isCacheable(url.pathname, request.method),
-    authenticated: request.headers.has('Authorization')
-  };
+  try {
+    const url = new URL(request.url);
+    const userAgent = request.headers.get('User-Agent') || '';
+    
+    // Validate request structure
+    if (!url.pathname || url.pathname === '/') {
+      throw new Error('Invalid request path');
+    }
+    
+    return {
+      type: determineRequestType(url.pathname),
+      priority: determinePriority(url.pathname, userAgent),
+      cacheable: isCacheable(url.pathname, request.method),
+      authenticated: request.headers.has('Authorization')
+    };
+  } catch (error) {
+    console.error('Voice request parsing error:', error);
+    // Return safe defaults on parse error
+    return {
+      type: 'api-call',
+      priority: 'normal',
+      cacheable: false,
+      authenticated: false
+    };
+  }
 }
 
 function determineRequestType(pathname) {
@@ -384,27 +400,42 @@ function handleError(error, request, env) {
 
 // Metrics recording
 async function recordMetrics(env, metrics) {
-  const dataPoint = {
-    timestamp: Date.now(),
-    ...metrics
-  };
-  
-  // Send to analytics (non-blocking)
-  env.ANALYTICS_QUEUE.send(dataPoint);
-  
-  // Store in KV for short-term aggregation
-  const key = `metrics:${Date.now()}:${Math.random()}`;
-  await env.METRICS_KV.put(key, JSON.stringify(dataPoint), {
-    expirationTtl: 3600 // 1 hour
-  });
+  try {
+    const dataPoint = {
+      timestamp: Date.now(),
+      ...metrics
+    };
+    
+    // Send to analytics (non-blocking)
+    if (env.ANALYTICS_QUEUE) {
+      env.ANALYTICS_QUEUE.send(dataPoint).catch(err => 
+        console.error('Analytics queue error:', err)
+      );
+    }
+    
+    // Store in KV for short-term aggregation
+    const key = `metrics:${Date.now()}:${Math.random()}`;
+    await env.METRICS_KV.put(key, JSON.stringify(dataPoint), {
+      expirationTtl: 3600 // 1 hour
+    });
+  } catch (error) {
+    // Log but don't throw - metrics should not break the request
+    console.error('Metrics recording failed:', error);
+  }
 }
 
 async function recordErrorMetrics(env, errorData) {
-  await env.ERROR_LOGS.put(
-    `error:${Date.now()}:${Math.random()}`,
-    JSON.stringify(errorData),
-    { expirationTtl: 86400 } // 24 hours
-  );
+  try {
+    await env.ERROR_LOGS.put(
+      `error:${Date.now()}:${Math.random()}`,
+      JSON.stringify(errorData),
+      { expirationTtl: 86400 } // 24 hours
+    );
+  } catch (error) {
+    // Fallback to console if KV fails
+    console.error('Failed to record error metrics:', error);
+    console.error('Original error data:', errorData);
+  }
 }
 ```
 
@@ -415,24 +446,52 @@ Advanced caching strategies for agent configurations and API responses.
 // workers/cache-manager/src/index.js
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    const cacheKey = generateCacheKey(request);
-    
-    // Check cache first
-    const cachedResponse = await getCachedResponse(cacheKey, env);
-    if (cachedResponse) {
-      return addCacheHeaders(cachedResponse, 'HIT');
+    try {
+      const url = new URL(request.url);
+      const cacheKey = generateCacheKey(request);
+      
+      // Check cache first
+      const cachedResponse = await getCachedResponse(cacheKey, env);
+      if (cachedResponse) {
+        return addCacheHeaders(cachedResponse, 'HIT');
+      }
+      
+      // Forward to origin with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+      
+      try {
+        const response = await fetch(request, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        // Cache response if appropriate
+        if (shouldCache(request, response)) {
+          ctx.waitUntil(
+            cacheResponse(cacheKey, response.clone(), env)
+              .catch(err => console.error('Cache write failed:', err))
+          );
+        }
+        
+        return addCacheHeaders(response, 'MISS');
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Cache manager error:', error);
+      
+      // Return error response or forward without caching
+      if (error.name === 'AbortError') {
+        return new Response('Request timeout', { status: 504 });
+      }
+      
+      // Try direct passthrough without caching
+      try {
+        return await fetch(request);
+      } catch (fallbackError) {
+        return new Response('Service unavailable', { status: 503 });
+      }
     }
-    
-    // Forward to origin
-    const response = await fetch(request);
-    
-    // Cache response if appropriate
-    if (shouldCache(request, response)) {
-      ctx.waitUntil(cacheResponse(cacheKey, response.clone(), env));
-    }
-    
-    return addCacheHeaders(response, 'MISS');
   }
 };
 
@@ -449,39 +508,57 @@ function generateCacheKey(request) {
 }
 
 async function getCachedResponse(cacheKey, env) {
-  const cached = await env.RESPONSE_CACHE.get(cacheKey, 'json');
-  
-  if (!cached) return null;
-  
-  // Check if cache is still valid
-  if (Date.now() > cached.expires) {
-    // Remove expired cache
-    await env.RESPONSE_CACHE.delete(cacheKey);
-    return null;
+  try {
+    const cached = await env.RESPONSE_CACHE.get(cacheKey, 'json');
+    
+    if (!cached) return null;
+    
+    // Check if cache is still valid
+    if (Date.now() > cached.expires) {
+      // Remove expired cache (non-blocking)
+      env.RESPONSE_CACHE.delete(cacheKey)
+        .catch(err => console.error('Failed to delete expired cache:', err));
+      return null;
+    }
+    
+    return new Response(cached.body, {
+      status: cached.status,
+      headers: cached.headers
+    });
+  } catch (error) {
+    console.error('Cache read error:', error);
+    return null; // Cache miss on error
   }
-  
-  return new Response(cached.body, {
-    status: cached.status,
-    headers: cached.headers
-  });
 }
 
 async function cacheResponse(cacheKey, response, env) {
-  const ttl = determineTTL(response);
-  
-  if (ttl <= 0) return;
-  
-  const cacheData = {
-    body: await response.text(),
-    status: response.status,
-    headers: Object.fromEntries(response.headers),
-    expires: Date.now() + (ttl * 1000),
-    cached: Date.now()
-  };
-  
-  await env.RESPONSE_CACHE.put(cacheKey, JSON.stringify(cacheData), {
-    expirationTtl: ttl
-  });
+  try {
+    const ttl = determineTTL(response);
+    
+    if (ttl <= 0) return;
+    
+    // Limit cache size to prevent memory issues
+    const body = await response.text();
+    if (body.length > 1024 * 1024) { // 1MB limit
+      console.warn('Response too large to cache:', cacheKey);
+      return;
+    }
+    
+    const cacheData = {
+      body: body,
+      status: response.status,
+      headers: Object.fromEntries(response.headers),
+      expires: Date.now() + (ttl * 1000),
+      cached: Date.now()
+    };
+    
+    await env.RESPONSE_CACHE.put(cacheKey, JSON.stringify(cacheData), {
+      expirationTtl: ttl
+    });
+  } catch (error) {
+    console.error('Cache write error:', error);
+    // Don't throw - caching failures shouldn't break the response
+  }
 }
 
 function shouldCache(request, response) {
@@ -560,31 +637,46 @@ export default {
 };
 
 async function validateRequest(request) {
-  const url = new URL(request.url);
-  const method = request.method;
-  const contentType = request.headers.get('Content-Type') || '';
-  
-  // Validate URL structure
-  if (!isValidPath(url.pathname)) {
-    return { valid: false, error: 'Invalid API path' };
-  }
-  
-  // Validate content type for POST/PUT requests
-  if (['POST', 'PUT'].includes(method)) {
-    if (!contentType.includes('application/json') && 
-        !contentType.includes('audio/') &&
-        !contentType.includes('application/octet-stream')) {
-      return { valid: false, error: 'Invalid content type' };
+  try {
+    const url = new URL(request.url);
+    const method = request.method;
+    const contentType = request.headers.get('Content-Type') || '';
+    
+    // Validate URL structure
+    if (!isValidPath(url.pathname)) {
+      return { valid: false, error: 'Invalid API path' };
     }
+    
+    // Validate method
+    const allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
+    if (!allowedMethods.includes(method)) {
+      return { valid: false, error: 'Method not allowed' };
+    }
+    
+    // Validate content type for POST/PUT requests
+    if (['POST', 'PUT', 'PATCH'].includes(method)) {
+      if (!contentType && method !== 'DELETE') {
+        return { valid: false, error: 'Content-Type header required' };
+      }
+      
+      if (contentType && !contentType.includes('application/json') && 
+          !contentType.includes('audio/') &&
+          !contentType.includes('application/octet-stream')) {
+        return { valid: false, error: 'Invalid content type' };
+      }
+    }
+    
+    // Validate request size
+    const contentLength = parseInt(request.headers.get('Content-Length') || '0');
+    if (contentLength > 10 * 1024 * 1024) { // 10MB limit
+      return { valid: false, error: 'Request too large' };
+    }
+    
+    return { valid: true };
+  } catch (error) {
+    console.error('Request validation error:', error);
+    return { valid: false, error: 'Invalid request format' };
   }
-  
-  // Validate request size
-  const contentLength = parseInt(request.headers.get('Content-Length') || '0');
-  if (contentLength > 10 * 1024 * 1024) { // 10MB limit
-    return { valid: false, error: 'Request too large' };
-  }
-  
-  return { valid: true };
 }
 
 async function authenticateRequest(request, env) {
@@ -643,43 +735,56 @@ async function validateJWT(token, env) {
 }
 
 async function validateAPIKey(apiKey, env) {
-  // Check API key in KV store
-  const keyData = await env.API_KEYS.get(apiKey, 'json');
-  
-  if (!keyData) {
-    return { authenticated: false, reason: 'Invalid API key' };
+  try {
+    // Check API key in KV store
+    const keyData = await env.API_KEYS.get(apiKey, 'json');
+    
+    if (!keyData) {
+      return { authenticated: false, reason: 'Invalid API key' };
+    }
+    
+    // Check if key is active
+    if (!keyData.active) {
+      return { authenticated: false, reason: 'API key disabled' };
+    }
+    
+    // Check expiration
+    if (keyData.expires && keyData.expires < Date.now()) {
+      return { authenticated: false, reason: 'API key expired' };
+    }
+    
+    // Check rate limits
+    const rateLimitKey = `rate_limit:${apiKey}`;
+    let currentUsage = 0;
+    
+    try {
+      const usageStr = await env.RATE_LIMITS.get(rateLimitKey);
+      currentUsage = parseInt(usageStr) || 0;
+    } catch (error) {
+      console.error('Failed to get rate limit:', error);
+      // Continue with 0 usage on error
+    }
+    
+    if (keyData.rateLimit && currentUsage >= keyData.rateLimit) {
+      return { authenticated: false, reason: 'Rate limit exceeded' };
+    }
+    
+    // Update rate limit counter (non-blocking)
+    env.RATE_LIMITS.put(rateLimitKey, 
+      String(currentUsage + 1), 
+      { expirationTtl: 3600 } // 1 hour window
+    ).catch(err => console.error('Failed to update rate limit:', err));
+    
+    return {
+      authenticated: true,
+      userId: keyData.userId,
+      role: keyData.role,
+      permissions: keyData.permissions || []
+    };
+  } catch (error) {
+    console.error('API key validation error:', error);
+    return { authenticated: false, reason: 'Authentication service error' };
   }
-  
-  // Check if key is active
-  if (!keyData.active) {
-    return { authenticated: false, reason: 'API key disabled' };
-  }
-  
-  // Check expiration
-  if (keyData.expires && keyData.expires < Date.now()) {
-    return { authenticated: false, reason: 'API key expired' };
-  }
-  
-  // Check rate limits
-  const rateLimitKey = `rate_limit:${apiKey}`;
-  const currentUsage = await env.RATE_LIMITS.get(rateLimitKey);
-  
-  if (currentUsage && parseInt(currentUsage) >= keyData.rateLimit) {
-    return { authenticated: false, reason: 'Rate limit exceeded' };
-  }
-  
-  // Update rate limit counter
-  await env.RATE_LIMITS.put(rateLimitKey, 
-    String((parseInt(currentUsage) || 0) + 1), 
-    { expirationTtl: 3600 } // 1 hour window
-  );
-  
-  return {
-    authenticated: true,
-    userId: keyData.userId,
-    role: keyData.role,
-    permissions: keyData.permissions || []
-  };
 }
 
 function addAuthHeaders(request, authResult) {
@@ -722,24 +827,29 @@ function createErrorResponse(message, status) {
 }
 
 async function generateJWTSignature(data, secret) {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    new TextEncoder().encode(data)
-  );
-  
-  return btoa(String.fromCharCode(...new Uint8Array(signature)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    
+    const signature = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      new TextEncoder().encode(data)
+    );
+    
+    return btoa(String.fromCharCode(...new Uint8Array(signature)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+  } catch (error) {
+    console.error('JWT signature generation error:', error);
+    throw new Error('Failed to generate signature');
+  }
 }
 ```
 
@@ -865,38 +975,56 @@ export default {
 };
 
 async function aggregateMetrics(metrics, env) {
-  const hourlyKey = `hourly:${Math.floor(Date.now() / 3600000)}`;
-  const currentHourly = await env.AGGREGATED_METRICS.get(hourlyKey, 'json') || {
-    requests: 0,
-    totalLatency: 0,
-    errors: 0,
-    cacheHits: 0,
-    regions: {}
-  };
-  
-  // Update aggregated data
-  currentHourly.requests += 1;
-  currentHourly.totalLatency += metrics.latency;
-  
-  if (metrics.error) {
-    currentHourly.errors += 1;
+  try {
+    const hourlyKey = `hourly:${Math.floor(Date.now() / 3600000)}`;
+    
+    let currentHourly;
+    try {
+      currentHourly = await env.AGGREGATED_METRICS.get(hourlyKey, 'json');
+    } catch (error) {
+      console.error('Failed to get aggregated metrics:', error);
+      currentHourly = null;
+    }
+    
+    // Initialize if not found or error occurred
+    if (!currentHourly) {
+      currentHourly = {
+        requests: 0,
+        totalLatency: 0,
+        errors: 0,
+        cacheHits: 0,
+        regions: {}
+      };
+    }
+    
+    // Update aggregated data
+    currentHourly.requests += 1;
+    currentHourly.totalLatency += metrics.latency || 0;
+    
+    if (metrics.error) {
+      currentHourly.errors += 1;
+    }
+    
+    if (metrics.cacheStatus === 'HIT') {
+      currentHourly.cacheHits += 1;
+    }
+    
+    const region = metrics.region || 'unknown';
+    if (!currentHourly.regions[region]) {
+      currentHourly.regions[region] = 0;
+    }
+    currentHourly.regions[region] += 1;
+    
+    // Store aggregated data
+    await env.AGGREGATED_METRICS.put(
+      hourlyKey,
+      JSON.stringify(currentHourly),
+      { expirationTtl: 86400 * 7 } // Keep for 7 days
+    );
+  } catch (error) {
+    console.error('Failed to aggregate metrics:', error);
+    // Don't throw - aggregation failures shouldn't break the analytics pipeline
   }
-  
-  if (metrics.cacheStatus === 'HIT') {
-    currentHourly.cacheHits += 1;
-  }
-  
-  if (!currentHourly.regions[metrics.region]) {
-    currentHourly.regions[metrics.region] = 0;
-  }
-  currentHourly.regions[metrics.region] += 1;
-  
-  // Store aggregated data
-  await env.AGGREGATED_METRICS.put(
-    hourlyKey,
-    JSON.stringify(currentHourly),
-    { expirationTtl: 86400 * 7 } // Keep for 7 days
-  );
 }
 ```
 

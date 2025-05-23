@@ -1050,7 +1050,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18.3'
-          otp-version: '27.3.4'
+          otp-version: '28.0'
       - run: mix test --exclude performance --exclude validation --exclude load_test --exclude stress_test
 
   component_performance_tests:
@@ -1061,7 +1061,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18.3'
-          otp-version: '27.3.4'
+          otp-version: '28.0'
       - run: mix test --only performance
       - uses: actions/upload-artifact@v4
         with:
@@ -1078,7 +1078,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18.3'
-          otp-version: '27.3.4'
+          otp-version: '28.0'
       - run: mix test --only validation
       - uses: actions/upload-artifact@v4
         with:
@@ -1094,7 +1094,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18.3'
-          otp-version: '27.3.4'
+          otp-version: '28.0'
       - run: mix test --only load_test
       - uses: actions/upload-artifact@v4
         with:
@@ -1110,7 +1110,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18.3'
-          otp-version: '27.3.4'
+          otp-version: '28.0'
       - run: mix test --only stress_test
       - uses: actions/upload-artifact@v4
         with:
@@ -1140,7 +1140,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18.3'
-          otp-version: '27.3.4'
+          otp-version: '28.0'
       - run: mix aybiza.generate_performance_report
       - uses: actions/upload-artifact@v4
         with:

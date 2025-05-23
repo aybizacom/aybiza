@@ -64,7 +64,8 @@ POST /api/v1/agents
   "models": {
     "default": "claude-3-5-sonnet-v2",
     "fast": "claude-3-5-haiku",
-    "complex": "claude-3-7-sonnet"
+    "complex": "claude-4-opus",
+    "advanced": "claude-4-sonnet"
   },
   "parameters": {
     "max_response_time": 1500,
@@ -117,7 +118,8 @@ GET /api/v1/agents/{agent_id}
       "style": "calm_informative"
     },
     "models": {
-      "default": "claude-3-5-sonnet-v2"
+      "default": "claude-3-5-sonnet-v2",
+      "complex": "claude-4-opus"
     }
   },
   "phone_numbers": [
@@ -556,6 +558,472 @@ X-AYBIZA-Event: call.incoming
 }
 ```
 
+## Billing & Payment APIs
+
+### Get Billing Account
+```http
+GET /api/v1/billing/account
+```
+
+**Response:**
+```json
+{
+  "account_number": "BILL-1234-5678",
+  "billing_type": "postpaid",
+  "payment_terms": "net_30",
+  "credit_limit": 10000.00,
+  "current_balance": 1250.50,
+  "currency": "USD",
+  "status": "active",
+  "auto_recharge": {
+    "enabled": false,
+    "amount": 1000.00,
+    "threshold": 100.00
+  }
+}
+```
+
+### List Invoices
+```http
+GET /api/v1/billing/invoices?page=1&limit=20&status=paid
+```
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "invoice_number": "INV-2025-01-000123",
+      "billing_period": {
+        "start": "2025-01-01",
+        "end": "2025-01-31"
+      },
+      "status": "paid",
+      "amounts": {
+        "subtotal": 2500.00,
+        "tax": 225.00,
+        "total": 2725.00
+      },
+      "due_date": "2025-02-15",
+      "paid_date": "2025-02-10",
+      "pdf_url": "https://invoices.aybiza.com/..."
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 45
+  }
+}
+```
+
+### Get Current Usage
+```http
+GET /api/v1/billing/usage/current
+```
+
+**Response:**
+```json
+{
+  "period": {
+    "start": "2025-01-01",
+    "end": "2025-01-23"
+  },
+  "usage": {
+    "call_minutes": {
+      "inbound": 12450,
+      "outbound": 8320,
+      "cost": 1567.70
+    },
+    "agent_sessions": {
+      "count": 3420,
+      "cost": 342.00
+    },
+    "api_calls": {
+      "count": 145000,
+      "cost": 72.50
+    },
+    "storage_gb": {
+      "amount": 125.5,
+      "cost": 12.55
+    },
+    "tool_executions": {
+      "count": 8900,
+      "cost": 89.00
+    }
+  },
+  "estimated_total": 2083.75
+}
+```
+
+### Add Payment Method
+```http
+POST /api/v1/billing/payment-methods
+```
+
+**Request Body:**
+```json
+{
+  "type": "credit_card",
+  "stripe_payment_method_id": "pm_1234567890",
+  "is_primary": true
+}
+```
+
+## Identity & SSO APIs
+
+### Configure SSO
+```http
+POST /api/v1/identity/sso/configure
+```
+
+**Request Body:**
+```json
+{
+  "provider": "okta",
+  "idp_entity_id": "http://www.okta.com/...",
+  "sso_url": "https://company.okta.com/app/...",
+  "certificate": "-----BEGIN CERTIFICATE-----...",
+  "attribute_mapping": {
+    "email": "user.email",
+    "name": "user.displayName",
+    "department": "user.department"
+  },
+  "auto_provision_users": true,
+  "default_role": "agent_user"
+}
+```
+
+### Get SSO Configuration
+```http
+GET /api/v1/identity/sso/configuration
+```
+
+**Response:**
+```json
+{
+  "provider": "okta",
+  "enabled": true,
+  "status": "active",
+  "idp_entity_id": "http://www.okta.com/...",
+  "sso_url": "https://company.okta.com/app/...",
+  "metadata_url": "https://api.aybiza.com/sso/metadata",
+  "auto_provision_users": true,
+  "jit_provisioning": true,
+  "statistics": {
+    "total_logins": 1240,
+    "active_users": 89,
+    "last_login": "2025-01-23T10:30:00Z"
+  }
+}
+```
+
+### List Active Sessions
+```http
+GET /api/v1/identity/sessions
+```
+
+**Response:**
+```json
+{
+  "sessions": [
+    {
+      "session_id": "sess_123456",
+      "user_id": "USR-1234567890",
+      "ip_address": "192.168.1.100",
+      "user_agent": "Mozilla/5.0...",
+      "location": {
+        "city": "San Francisco",
+        "region": "CA",
+        "country": "US"
+      },
+      "created_at": "2025-01-23T08:00:00Z",
+      "last_activity": "2025-01-23T10:45:00Z",
+      "expires_at": "2025-01-24T08:00:00Z"
+    }
+  ]
+}
+```
+
+## KYC & Compliance APIs
+
+### Submit KYC Verification
+```http
+POST /api/v1/compliance/kyc/submit
+```
+
+**Request Body:**
+```json
+{
+  "verification_type": "business",
+  "business_info": {
+    "legal_name": "ACME Corporation",
+    "registration_number": "12345678",
+    "tax_id": "98-7654321",
+    "address": {
+      "line1": "123 Main St",
+      "city": "San Francisco",
+      "state": "CA",
+      "postal_code": "94105",
+      "country": "US"
+    }
+  },
+  "documents": [
+    {
+      "type": "incorporation",
+      "file_id": "file_123456"
+    },
+    {
+      "type": "tax_certificate",
+      "file_id": "file_789012"
+    }
+  ]
+}
+```
+
+### Get KYC Status
+```http
+GET /api/v1/compliance/kyc/status
+```
+
+**Response:**
+```json
+{
+  "verification_id": "kyc_123456",
+  "status": "approved",
+  "risk_level": "low",
+  "verified_at": "2025-01-20T14:30:00Z",
+  "expiry_date": "2026-01-20",
+  "documents": [
+    {
+      "type": "incorporation",
+      "status": "verified",
+      "verified_at": "2025-01-20T14:25:00Z"
+    }
+  ]
+}
+```
+
+### Check Sanctions
+```http
+POST /api/v1/compliance/sanctions/check
+```
+
+**Request Body:**
+```json
+{
+  "entity_type": "business",
+  "name": "ACME Corporation",
+  "country": "US"
+}
+```
+
+**Response:**
+```json
+{
+  "status": "clear",
+  "checked_at": "2025-01-23T10:00:00Z",
+  "next_check_date": "2025-02-23",
+  "matches": []
+}
+```
+
+## Feature Management APIs
+
+### List Feature Flags
+```http
+GET /api/v1/features/flags
+```
+
+**Response:**
+```json
+{
+  "flags": [
+    {
+      "name": "claude_4_models",
+      "description": "Enable Claude 4 Opus and Sonnet models",
+      "enabled": true,
+      "rollout_percentage": 100,
+      "configuration": {
+        "models": ["opus-4", "sonnet-4"]
+      }
+    },
+    {
+      "name": "advanced_analytics",
+      "description": "Enhanced analytics dashboard",
+      "enabled": true,
+      "rollout_percentage": 50,
+      "targeting_rules": {
+        "tenant_tiers": ["enterprise"]
+      }
+    }
+  ]
+}
+```
+
+### Update Feature Flag
+```http
+PUT /api/v1/features/flags/claude_4_models
+```
+
+**Request Body:**
+```json
+{
+  "enabled": true,
+  "rollout_percentage": 75,
+  "configuration": {
+    "models": ["opus-4", "sonnet-4"],
+    "extended_thinking": true
+  }
+}
+```
+
+## White Label APIs
+
+### Configure White Label
+```http
+POST /api/v1/whitelabel/configure
+```
+
+**Request Body:**
+```json
+{
+  "brand_name": "ACME Voice AI",
+  "logo_url": "https://cdn.acme.com/logo.png",
+  "favicon_url": "https://cdn.acme.com/favicon.ico",
+  "colors": {
+    "primary": "#1E40AF",
+    "secondary": "#10B981"
+  },
+  "custom_domain": "voice.acme.com",
+  "support": {
+    "email": "support@acme.com",
+    "phone": "+1-800-ACME-AI"
+  }
+}
+```
+
+## Quality & Analytics APIs
+
+### Get Call Quality Score
+```http
+GET /api/v1/quality/calls/{call_id}/score
+```
+
+**Response:**
+```json
+{
+  "call_id": "call_123456",
+  "scores": {
+    "overall": 0.92,
+    "audio_quality": 0.95,
+    "agent_performance": 0.89,
+    "customer_satisfaction": 0.91,
+    "compliance": 1.0
+  },
+  "issues_detected": [],
+  "highlights": [
+    "Excellent problem resolution",
+    "Clear communication throughout"
+  ],
+  "scored_at": "2025-01-23T10:45:00Z"
+}
+```
+
+### Get Agent Performance Metrics
+```http
+GET /api/v1/quality/agents/{agent_id}/performance?period=7d
+```
+
+**Response:**
+```json
+{
+  "agent_id": "agent_123456",
+  "period": {
+    "start": "2025-01-16",
+    "end": "2025-01-23"
+  },
+  "metrics": {
+    "total_calls": 245,
+    "successful_calls": 238,
+    "average_duration": 185,
+    "average_response_time_ms": 750,
+    "customer_satisfaction": 4.3,
+    "first_call_resolution": 0.82,
+    "error_rate": 0.028
+  },
+  "trends": {
+    "satisfaction_trend": "improving",
+    "efficiency_trend": "stable"
+  }
+}
+```
+
+### Submit Customer Feedback
+```http
+POST /api/v1/quality/feedback
+```
+
+**Request Body:**
+```json
+{
+  "call_id": "call_123456",
+  "rating": 5,
+  "nps_score": 9,
+  "comment": "Very helpful and resolved my issue quickly",
+  "categories": ["helpful", "fast", "knowledgeable"]
+}
+```
+
+## Partner APIs
+
+### List Partner Organizations
+```http
+GET /api/v1/partners/organizations
+```
+
+**Response:**
+```json
+{
+  "organizations": [
+    {
+      "organization_id": "org_123456",
+      "name": "ACME Corp",
+      "relationship_type": "managed",
+      "created_at": "2025-01-01T00:00:00Z",
+      "statistics": {
+        "total_agents": 12,
+        "active_calls_today": 145,
+        "monthly_revenue": 4500.00
+      }
+    }
+  ]
+}
+```
+
+### Get Partner Dashboard
+```http
+GET /api/v1/partners/dashboard
+```
+
+**Response:**
+```json
+{
+  "partner": {
+    "code": "PTR-1234-5678",
+    "tier": "gold",
+    "commission_rate": 25.00
+  },
+  "statistics": {
+    "total_organizations": 15,
+    "active_organizations": 14,
+    "monthly_revenue": 45000.00,
+    "monthly_commission": 11250.00,
+    "ytd_commission": 125000.00
+  }
+}
+```
+
 ## Error Handling
 
 ### HTTP Status Codes
@@ -677,6 +1145,22 @@ curl https://api.aybiza.com/api/v1/agents/agent_123456 \
 ```
 
 ## Changelog
+
+### v1.4.0 (2025-01-23)
+- Added comprehensive Billing & Payment APIs with usage metering
+- Added Identity & SSO APIs supporting SAML, OIDC, Azure AD, and Okta
+- Added KYC & Compliance APIs with business verification and sanctions screening
+- Added Feature Management APIs with feature flags and rollout controls
+- Added White Label APIs for custom branding and domains
+- Added Quality & Analytics APIs with AI-powered call scoring
+- Added Partner APIs for reseller and partner management
+- Enhanced API documentation with detailed request/response examples
+
+### v1.3.0 (2025-01-23)
+- Added Claude 4 Opus and Sonnet model support on AWS Bedrock
+- Added Python code execution runtime support
+- Enhanced documentation for AWS Bedrock Claude 4 integration
+- Note: Some Claude 4 features may have limitations on Bedrock - see aws_bedrock_claude_implementation.md
 
 ### v1.2.0 (2025-01-15)
 - Added automation tools API

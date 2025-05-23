@@ -87,11 +87,11 @@ Incoming Call → Twilio → Cloudflare Edge Processing →
 - **DNS**: Anycast with health checks
 
 ## Backend Layer (AWS)
-- **Runtime**: Elixir 1.18.3 / Erlang OTP 27.3.4
+- **Runtime**: Elixir 1.18.3 / Erlang OTP 28.0
 - **Framework**: Phoenix 1.7.21+ with LiveView
 - **Database**: PostgreSQL 16.9+ with TimescaleDB 2.20.0
-- **Cache**: Redis 8.0+ with cluster mode
-- **Media**: Membrane Framework 0.11.0+
+- **Cache**: Redis 7.4+ with cluster mode
+- **Media**: Membrane Framework 1.2.3+
 - **Containers**: Docker with multi-stage builds
 - **Orchestration**: ECS Fargate with auto-scaling
 
@@ -149,7 +149,7 @@ Incoming Call → Twilio → Cloudflare Edge Processing →
 # Core Technical Decisions (Updated):
 
 1. **Hybrid Architecture**: Cloudflare edge + AWS backend for optimal performance and cost
-2. **Latest Tech Stack**: Elixir 1.18.3, OTP 27.3.4, Phoenix 1.7.21, PostgreSQL 16.9
+2. **Latest Tech Stack**: Elixir 1.18.3, OTP 28.0, Phoenix 1.7.21, PostgreSQL 16.9
 3. **Premium AI**: Claude 3.7 Sonnet, Nova-3 STT, Aura-2 TTS for best-in-class quality
 4. **Zero Conversion**: Direct μ-law audio processing (no format conversion overhead)
 5. **Multi-Model**: Dynamic model selection based on query complexity and latency requirements
@@ -222,7 +222,7 @@ Incoming Call → Twilio → Cloudflare Edge Processing →
 # Key Documentation Resources (Updated):
 - [Elixir 1.18.3 Documentation](https://elixir-lang.org/docs.html)
 - [Phoenix 1.7.21 Framework](https://hexdocs.pm/phoenix/overview.html)
-- [Membrane Framework 0.11.0](https://membrane.stream/)
+- [Membrane Framework 1.2.3](https://membrane.stream/)
 - [Cloudflare Workers](https://developers.cloudflare.com/workers/)
 - [AWS Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
 - [Deepgram Nova-3 API](https://developers.deepgram.com/docs/nova-3)

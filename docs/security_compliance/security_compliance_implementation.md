@@ -27,6 +27,28 @@ The AYBIZA platform implements a comprehensive, defense-in-depth security archit
   - Automatic suspension after failed attempts
   - Device tracking and authorization
 
+- **Enterprise Single Sign-On (SSO)**
+  - SAML 2.0 with encrypted assertions
+  - OpenID Connect (OIDC) with PKCE
+  - Azure AD integration with conditional access
+  - Okta integration with MFA enforcement
+  - Google Workspace integration
+  - Just-In-Time (JIT) provisioning
+  - SCIM 2.0 for automated user lifecycle
+  - Session management with Redis clustering
+  - SSO session timeout enforcement
+  - Device trust verification
+
+- **Session Security**
+  - Distributed session storage in Redis
+  - Session fixation prevention
+  - Secure session cookie attributes (HttpOnly, Secure, SameSite)
+  - Idle timeout (30 minutes default)
+  - Absolute timeout (8 hours default)
+  - Concurrent session limits
+  - Session invalidation on security events
+  - Device fingerprinting and tracking
+
 #### API Security
 - **Transport Layer Security**
   - TLS 1.3 enforcement
@@ -1356,8 +1378,14 @@ defmodule Aybiza.Security.ApiKeyAuth do
   end
   
   defp hash_api_key(key) do
-    # Securely hash the API key for comparison
-    # ...
+    # Securely hash the API key using SHA256
+    # API keys are high-entropy random strings, so SHA256 is appropriate
+    # For user passwords, use Argon2 instead
+    :crypto.hash(:sha256, key)
+    |> Base.encode16(case: :lower)
+    |> then(&{:ok, &1})
+  rescue
+    _ -> {:error, :hash_failed}
   end
   
   defp check_key_expiration(key_data) do
@@ -1428,6 +1456,361 @@ defmodule Aybiza.Security.PiiRedaction do
   end
   
   # Additional PII types can be handled here
+end
+```
+
+### Input Validation
+```elixir
+# Comprehensive input validation for voice agents
+defmodule Aybiza.Security.InputValidation do
+  @moduledoc """
+  Input validation and sanitization for all user inputs
+  """
+  
+  # Phone number validation
+  def validate_phone_number(phone) when is_binary(phone) do
+    cleaned = Regex.replace(~r/[^\d+]/, phone, "")
+    
+    cond do
+      # International format
+      Regex.match?(~r/^\+\d{1,3}\d{4,14}$/, cleaned) ->
+        {:ok, cleaned}
+      
+      # US format (10 digits)
+      Regex.match?(~r/^\d{10}$/, cleaned) ->
+        {:ok, "+1" <> cleaned}
+      
+      # US format with country code
+      Regex.match?(~r/^1\d{10}$/, cleaned) ->
+        {:ok, "+" <> cleaned}
+      
+      true ->
+        {:error, "Invalid phone number format"}
+    end
+  end
+  
+  def validate_phone_number(_), do: {:error, "Phone number must be a string"}
+  
+  # Email validation with strict rules
+  def validate_email(email) when is_binary(email) do
+    email = String.downcase(String.trim(email))
+    
+    case Regex.match?(~r/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/, email) do
+      true ->
+        # Additional checks
+        cond do
+          String.length(email) > 255 ->
+            {:error, "Email too long"}
+          
+          String.contains?(email, ["...", ".@", "@."]) ->
+            {:error, "Invalid email format"}
+          
+          true ->
+            {:ok, email}
+        end
+      
+      false ->
+        {:error, "Invalid email format"}
+    end
+  end
+  
+  def validate_email(_), do: {:error, "Email must be a string"}
+  
+  # Safe atom conversion - NEVER use String.to_atom with user input
+  def safe_to_atom(string) when is_binary(string) do
+    try do
+      {:ok, String.to_existing_atom(string)}
+    rescue
+      ArgumentError -> {:error, "Invalid atom"}
+    end
+  end
+  
+  # Agent ID validation
+  def validate_agent_id(agent_id) when is_binary(agent_id) do
+    case Regex.match?(~r/^agent_[a-zA-Z0-9]{6,12}$/, agent_id) do
+      true -> {:ok, agent_id}
+      false -> {:error, "Invalid agent ID format"}
+    end
+  end
+  
+  # Transcript text validation and sanitization
+  def validate_transcript(text) when is_binary(text) do
+    cond do
+      String.length(text) == 0 ->
+        {:error, "Empty transcript"}
+      
+      String.length(text) > 10_000 ->
+        {:error, "Transcript too long"}
+      
+      contains_control_characters?(text) ->
+        {:error, "Invalid characters in transcript"}
+      
+      true ->
+        sanitized = text
+        |> String.trim()
+        |> remove_excessive_whitespace()
+        |> strip_html_tags()
+        
+        {:ok, sanitized}
+    end
+  end
+  
+  # API parameter validation
+  def validate_api_params(params) when is_map(params) do
+    with {:ok, _} <- validate_required_fields(params),
+         {:ok, _} <- validate_field_types(params),
+         {:ok, _} <- validate_field_lengths(params) do
+      {:ok, sanitize_params(params)}
+    end
+  end
+  
+  # Rate limiting key validation
+  def validate_rate_limit_key(key) when is_binary(key) do
+    case Regex.match?(~r/^[a-zA-Z0-9:_-]+$/, key) do
+      true -> {:ok, key}
+      false -> {:error, "Invalid rate limit key format"}
+    end
+  end
+  
+  # Helper functions
+  defp contains_control_characters?(text) do
+    Regex.match?(~r/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/, text)
+  end
+  
+  defp remove_excessive_whitespace(text) do
+    text
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
+  
+  defp strip_html_tags(text) do
+    Regex.replace(~r/<[^>]+>/, text, "")
+  end
+  
+  defp validate_required_fields(params) do
+    required = ["agent_id", "action"]
+    missing = required -- Map.keys(params)
+    
+    case missing do
+      [] -> {:ok, params}
+      fields -> {:error, "Missing required fields: #{Enum.join(fields, ", ")}"}
+    end
+  end
+  
+  defp validate_field_types(params) do
+    validations = %{
+      "agent_id" => &is_binary/1,
+      "action" => &is_binary/1,
+      "timeout" => &is_integer/1,
+      "options" => &is_map/1
+    }
+    
+    errors = Enum.reduce(params, [], fn {key, value}, acc ->
+      case Map.get(validations, key) do
+        nil -> acc
+        validator ->
+          if validator.(value) do
+            acc
+          else
+            ["Invalid type for #{key}" | acc]
+          end
+      end
+    end)
+    
+    case errors do
+      [] -> {:ok, params}
+      _ -> {:error, Enum.join(errors, ", ")}
+    end
+  end
+  
+  defp validate_field_lengths(params) do
+    max_lengths = %{
+      "agent_id" => 50,
+      "action" => 100,
+      "description" => 1000
+    }
+    
+    errors = Enum.reduce(params, [], fn {key, value}, acc ->
+      case Map.get(max_lengths, key) do
+        nil -> acc
+        max_length when is_binary(value) ->
+          if String.length(value) <= max_length do
+            acc
+          else
+            ["#{key} exceeds maximum length of #{max_length}" | acc]
+          end
+        _ -> acc
+      end
+    end)
+    
+    case errors do
+      [] -> {:ok, params}
+      _ -> {:error, Enum.join(errors, ", ")}
+    end
+  end
+  
+  defp sanitize_params(params) do
+    Enum.map(params, fn {key, value} ->
+      {key, sanitize_value(value)}
+    end)
+    |> Enum.into(%{})
+  end
+  
+  defp sanitize_value(value) when is_binary(value) do
+    value
+    |> String.trim()
+    |> strip_html_tags()
+  end
+  
+  defp sanitize_value(value), do: value
+end
+```
+
+### Rate Limiting Implementation
+```elixir
+# Enhanced rate limiting with multiple strategies
+defmodule Aybiza.Security.RateLimiter do
+  @moduledoc """
+  Multi-strategy rate limiting for API and voice endpoints
+  """
+  
+  alias Aybiza.Cache.Redis
+  
+  # Token bucket algorithm for API calls
+  def check_api_rate_limit(key, opts \\ []) do
+    bucket_size = Keyword.get(opts, :bucket_size, 100)
+    refill_rate = Keyword.get(opts, :refill_rate, 10)  # per second
+    
+    with {:ok, key} <- InputValidation.validate_rate_limit_key(key),
+         {:ok, tokens} <- get_token_bucket(key, bucket_size, refill_rate) do
+      if tokens > 0 do
+        consume_token(key)
+        {:ok, tokens - 1}
+      else
+        {:error, :rate_limit_exceeded}
+      end
+    end
+  end
+  
+  # Sliding window for voice calls
+  def check_voice_rate_limit(tenant_id, window_size \\ 3600) do
+    key = "voice_rate:#{tenant_id}"
+    max_calls = get_max_calls_for_tenant(tenant_id)
+    current_time = System.os_time(:second)
+    window_start = current_time - window_size
+    
+    with {:ok, conn} <- Redis.get_connection(),
+         {:ok, call_count} <- count_calls_in_window(conn, key, window_start, current_time) do
+      if call_count < max_calls do
+        add_call_timestamp(conn, key, current_time)
+        {:ok, %{used: call_count + 1, limit: max_calls}}
+      else
+        {:error, :voice_rate_limit_exceeded}
+      end
+    end
+  end
+  
+  # Circuit breaker for preventing abuse
+  def check_abuse_circuit(ip_address) do
+    key = "abuse:#{ip_address}"
+    threshold = 50  # requests in 60 seconds
+    
+    with {:ok, conn} <- Redis.get_connection(),
+         {:ok, count} <- Redix.command(conn, ["INCR", key]) do
+      if count == 1 do
+        Redix.command(conn, ["EXPIRE", key, 60])
+      end
+      
+      if count > threshold do
+        # Trigger circuit breaker
+        Redix.command(conn, ["SETEX", "blocked:#{ip_address}", 3600, "1"])
+        {:error, :circuit_breaker_open}
+      else
+        {:ok, count}
+      end
+    end
+  end
+  
+  # DDoS protection with distributed rate limiting
+  def check_ddos_protection(request_signature) do
+    # Use Cloudflare rate limiting for edge protection
+    # This is a backup for origin protection
+    key = "ddos:#{request_signature}"
+    
+    case Cachex.incr(:ddos_cache, key) do
+      {:ok, count} when count > 1000 ->
+        # Alert security team
+        SecurityAlerts.notify_ddos_attempt(request_signature)
+        {:error, :ddos_protection_triggered}
+      
+      {:ok, count} ->
+        # Set TTL on first increment
+        if count == 1 do
+          Cachex.expire(:ddos_cache, key, :timer.seconds(60))
+        end
+        {:ok, count}
+      
+      _ ->
+        {:error, :rate_limit_error}
+    end
+  end
+  
+  # Helper functions
+  defp get_token_bucket(key, bucket_size, refill_rate) do
+    script = """
+    local key = KEYS[1]
+    local bucket_size = tonumber(ARGV[1])
+    local refill_rate = tonumber(ARGV[2])
+    local current_time = tonumber(ARGV[3])
+    
+    local bucket = redis.call('HMGET', key, 'tokens', 'last_refill')
+    local tokens = tonumber(bucket[1]) or bucket_size
+    local last_refill = tonumber(bucket[2]) or current_time
+    
+    local time_passed = current_time - last_refill
+    local tokens_to_add = math.floor(time_passed * refill_rate)
+    tokens = math.min(bucket_size, tokens + tokens_to_add)
+    
+    redis.call('HMSET', key, 'tokens', tokens, 'last_refill', current_time)
+    redis.call('EXPIRE', key, 3600)
+    
+    return tokens
+    """
+    
+    {:ok, conn} = Redis.get_connection()
+    Redix.command(conn, ["EVAL", script, 1, key, bucket_size, refill_rate, System.os_time(:second)])
+  end
+  
+  defp consume_token(key) do
+    {:ok, conn} = Redis.get_connection()
+    Redix.command(conn, ["HINCRBY", key, "tokens", -1])
+  end
+  
+  defp get_max_calls_for_tenant(tenant_id) do
+    # Get from database based on subscription tier
+    case Aybiza.Tenants.get_tenant(tenant_id) do
+      %{subscription_tier: "enterprise"} -> 10_000
+      %{subscription_tier: "business"} -> 1_000
+      %{subscription_tier: "starter"} -> 100
+      _ -> 50
+    end
+  end
+  
+  defp count_calls_in_window(conn, key, window_start, current_time) do
+    case Redix.command(conn, ["ZCOUNT", key, window_start, current_time]) do
+      {:ok, count} -> {:ok, count}
+      _ -> {:error, :redis_error}
+    end
+  end
+  
+  defp add_call_timestamp(conn, key, timestamp) do
+    # Remove old entries and add new one
+    Redix.pipeline(conn, [
+      ["ZREMRANGEBYSCORE", key, "-inf", timestamp - 3600],
+      ["ZADD", key, timestamp, timestamp],
+      ["EXPIRE", key, 3600]
+    ])
+  end
 end
 ```
 
@@ -1663,6 +2046,127 @@ defmodule Aybiza.Automation.SecureToolExecutor do
   end
 end
 ```
+
+### KYC & Business Verification Security
+
+#### Secure Document Processing
+- **Document Encryption**
+  - End-to-end encryption for uploaded documents
+  - Secure storage in S3 with customer-managed keys
+  - Automatic document expiration and deletion
+  - Access logging for all document operations
+
+- **Third-Party Integration Security**
+  - Encrypted API credentials with AWS Secrets Manager
+  - Mutual TLS for provider connections
+  - Request signing and verification
+  - Rate limiting per verification request
+
+- **Data Retention & Privacy**
+  - Configurable retention periods per jurisdiction
+  - Automatic PII redaction in logs
+  - Right to erasure (GDPR Article 17) support
+  - Secure data export capabilities
+
+### Advanced Threat Detection
+
+#### AI-Powered Threat Intelligence
+- **Voice Security Monitoring**
+  - Real-time voice cloning detection
+  - Deepfake audio identification
+  - Caller ID spoofing prevention
+  - Audio anomaly detection
+  - Voice biometric verification
+
+- **Prompt Injection Prevention**
+  - Pattern-based detection rules
+  - ML model for injection classification
+  - Real-time blocking and sanitization
+  - Threat signature updates
+  - False positive tuning
+
+- **Behavioral Analytics**
+  - User behavior baseline establishment
+  - Anomaly detection algorithms
+  - Risk scoring per session
+  - Automated threat response
+  - Security event correlation
+
+#### Security Operations Center (SOC) Integration
+- **Real-Time Monitoring**
+  - 24/7 security event monitoring
+  - Automated incident creation
+  - Threat intelligence feeds
+  - Security orchestration (SOAR)
+  - Incident response automation
+
+- **Threat Hunting**
+  - Proactive threat searching
+  - IoC (Indicators of Compromise) tracking
+  - Advanced persistent threat detection
+  - Security posture assessment
+  - Vulnerability scanning
+
+### Customer Credential Vault
+
+#### Secure Credential Storage
+```elixir
+defmodule Aybiza.Security.CredentialVault do
+  @moduledoc """
+  Secure storage for customer API keys and credentials
+  """
+  
+  def store_credential(tenant_id, credential_type, credential_data) do
+    # Generate tenant-specific data encryption key
+    {:ok, data_key} = generate_data_encryption_key(tenant_id)
+    
+    # Encrypt credential with envelope encryption
+    encrypted_credential = encrypt_with_kms(credential_data, data_key)
+    
+    # Store with access controls
+    %CustomerCredential{
+      tenant_id: tenant_id,
+      credential_type: credential_type,
+      encrypted_data: encrypted_credential,
+      kms_key_alias: "alias/aybiza-tenant-#{tenant_id}",
+      encryption_context: build_encryption_context(tenant_id),
+      last_rotated_at: DateTime.utc_now()
+    }
+    |> Repo.insert()
+  end
+  
+  defp generate_data_encryption_key(tenant_id) do
+    ExAws.KMS.generate_data_key(
+      key_id: "alias/aybiza-tenant-#{tenant_id}",
+      key_spec: "AES_256"
+    )
+    |> ExAws.request()
+  end
+  
+  defp build_encryption_context(tenant_id) do
+    %{
+      "tenant_id" => tenant_id,
+      "service" => "credential_vault",
+      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+  end
+end
+```
+
+#### Credential Access Controls
+- **Fine-Grained Permissions**
+  - Role-based credential access
+  - Time-based access windows
+  - IP-based restrictions
+  - MFA requirement for sensitive credentials
+  - Audit trail for all access
+
+- **Automatic Rotation**
+  - Scheduled credential rotation
+  - Zero-downtime rotation process
+  - Notification before expiration
+  - Rollback capabilities
+  - Version history maintenance
 
 ## Compliance Framework
 

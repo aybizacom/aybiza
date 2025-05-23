@@ -239,10 +239,10 @@ The AYBIZA platform leverages a Cloudflare+AWS hybrid architecture to achieve op
   end
   ```
 
-#### 3. AWS Lambda (Runtime nodejs20.x)
+#### 3. AWS Lambda (Runtime nodejs22.x)
 - **Usage**: Event-driven processing and webhooks
 - **Configuration**:
-  - Runtime: Node.js 20.x
+  - Runtime: Node.js 22.x (LTS)
   - Architecture: arm64
   - Memory: 1024 MB (configurable)
   - Timeout: 30 seconds
@@ -323,7 +323,7 @@ The AYBIZA platform leverages a Cloudflare+AWS hybrid architecture to achieve op
   - Session storage for edge authentication
 - **Implementation**:
   ```elixir
-  # Example Redis configuration (Updated for Redis 8.0)
+  # Example Redis configuration (Updated for Redis 7.4)
   defmodule Aybiza.Redis.Client do
     def config do
       %{
@@ -339,7 +339,7 @@ The AYBIZA platform leverages a Cloudflare+AWS hybrid architecture to achieve op
         ],
         reconnection_attempts: 10,
         reconnection_backoff: 100,
-        # Redis 8.0 specific features
+        # Redis 7.4 specific features
         enable_query_engine: true,  # New Redis Query Engine
         enable_json: true,          # Built-in JSON support
         enable_search: true,        # Integrated RediSearch

@@ -5,7 +5,7 @@ This guide provides comprehensive best practices for developing the AYBIZA platf
 
 ## Technology Stack (Current)
 - **Elixir**: 1.18.3+ (with experimental features enabled)
-- **Erlang/OTP**: 27.3.4+ (with JIT compilation)
+- **Erlang/OTP**: 28.0+ (with JIT compilation)
 - **Phoenix**: 1.7.21+ (with LiveView 1.1.0+)
 - **PostgreSQL**: 16.9+ (with TimescaleDB 2.20.0+)
 - **Redis**: 7.4+ (for session management and caching)
@@ -1309,6 +1309,266 @@ export EDGE_REGIONS=${EDGE_REGIONS:-"lax1,dfw1,lhr1,fra1"}
 # Health check configuration
 export HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-30}
 export READINESS_CHECK_TIMEOUT=${READINESS_CHECK_TIMEOUT:-5}
+```
+
+## 10. Standardized Error Handling
+
+### 10.1 Error Handling Patterns
+```elixir
+defmodule Aybiza.ErrorHandler do
+  @moduledoc """
+  Standardized error handling patterns for consistent error management
+  """
+  
+  require Logger
+  
+  # Define standard error types
+  @type error_reason :: :invalid_input | :not_found | :unauthorized | 
+                        :rate_limited | :external_service_error | 
+                        :timeout | :internal_error
+  
+  @type error_result :: {:error, error_reason()} | 
+                        {:error, error_reason(), binary()} |
+                        {:error, error_reason(), binary(), map()}
+  
+  @doc """
+  Standardized error handling with consistent logging and formatting
+  """
+  def handle_error({:error, reason} = error, context \\ %{}) do
+    log_error(reason, context)
+    normalize_error(error)
+  end
+  
+  def handle_error({:error, reason, message} = error, context \\ %{}) do
+    log_error(reason, message, context)
+    normalize_error(error)
+  end
+  
+  def handle_error({:error, reason, message, details} = error, context \\ %{}) do
+    log_error(reason, message, Map.merge(context, details))
+    normalize_error(error)
+  end
+  
+  @doc """
+  Wrap functions with error handling
+  """
+  defmacro with_error_handling(context \\ %{}, do: block) do
+    quote do
+      try do
+        unquote(block)
+      rescue
+        error in [ArgumentError, KeyError] ->
+          Aybiza.ErrorHandler.handle_error(
+            {:error, :invalid_input, Exception.message(error)},
+            unquote(context)
+          )
+        
+        error in [Ecto.NoResultsError] ->
+          Aybiza.ErrorHandler.handle_error(
+            {:error, :not_found, "Resource not found"},
+            unquote(context)
+          )
+        
+        error ->
+          Aybiza.ErrorHandler.handle_error(
+            {:error, :internal_error, Exception.message(error), %{stacktrace: __STACKTRACE__}},
+            unquote(context)
+          )
+      catch
+        :exit, reason ->
+          Aybiza.ErrorHandler.handle_error(
+            {:error, :internal_error, "Process exited", %{exit_reason: reason}},
+            unquote(context)
+          )
+      end
+    end
+  end
+  
+  @doc """
+  Chain operations with error handling
+  """
+  def chain(value, functions) do
+    Enum.reduce_while(functions, {:ok, value}, fn fun, {:ok, acc} ->
+      case fun.(acc) do
+        {:ok, result} -> {:cont, {:ok, result}}
+        {:error, _} = error -> {:halt, handle_error(error)}
+      end
+    end)
+  end
+  
+  # Private functions
+  defp log_error(reason, context) do
+    Logger.error("Error occurred",
+      reason: reason,
+      context: sanitize_context(context)
+    )
+  end
+  
+  defp log_error(reason, message, context) do
+    Logger.error(message,
+      reason: reason,
+      context: sanitize_context(context)
+    )
+  end
+  
+  defp normalize_error({:error, reason}) when is_atom(reason) do
+    {:error, %{
+      type: reason,
+      message: humanize_error(reason)
+    }}
+  end
+  
+  defp normalize_error({:error, reason, message}) do
+    {:error, %{
+      type: reason,
+      message: message
+    }}
+  end
+  
+  defp normalize_error({:error, reason, message, details}) do
+    {:error, %{
+      type: reason,
+      message: message,
+      details: sanitize_details(details)
+    }}
+  end
+  
+  defp humanize_error(:invalid_input), do: "Invalid input provided"
+  defp humanize_error(:not_found), do: "Resource not found"
+  defp humanize_error(:unauthorized), do: "Unauthorized access"
+  defp humanize_error(:rate_limited), do: "Rate limit exceeded"
+  defp humanize_error(:external_service_error), do: "External service error"
+  defp humanize_error(:timeout), do: "Operation timed out"
+  defp humanize_error(:internal_error), do: "Internal server error"
+  defp humanize_error(_), do: "An error occurred"
+  
+  defp sanitize_context(context) do
+    Map.drop(context, [:password, :token, :secret, :api_key])
+  end
+  
+  defp sanitize_details(details) do
+    details
+    |> Map.drop([:password, :token, :secret, :api_key])
+    |> Map.update(:stacktrace, nil, &format_stacktrace/1)
+  end
+  
+  defp format_stacktrace(stacktrace) when is_list(stacktrace) do
+    Enum.take(stacktrace, 5)
+    |> Enum.map(&Exception.format_stacktrace_entry/1)
+  end
+  
+  defp format_stacktrace(stacktrace), do: stacktrace
+end
+```
+
+### 10.2 Error Handling in Practice
+```elixir
+defmodule Aybiza.VoiceProcessing do
+  import Aybiza.ErrorHandler
+  
+  @doc """
+  Example of using standardized error handling
+  """
+  def process_audio(audio_data, opts \\ %{}) do
+    context = %{
+      operation: :process_audio,
+      audio_size: byte_size(audio_data),
+      opts: opts
+    }
+    
+    with_error_handling context do
+      with {:ok, validated} <- validate_audio(audio_data),
+           {:ok, processed} <- apply_processing(validated, opts),
+           {:ok, result} <- save_result(processed) do
+        {:ok, result}
+      end
+    end
+  end
+  
+  @doc """
+  Example with chain
+  """
+  def process_call_transcript(transcript) do
+    context = %{operation: :process_transcript, length: String.length(transcript)}
+    
+    ErrorHandler.chain(transcript, [
+      &validate_transcript/1,
+      &detect_language/1,
+      &extract_entities/1,
+      &analyze_sentiment/1,
+      &save_analysis/1
+    ])
+    |> case do
+      {:ok, result} -> {:ok, result}
+      error -> ErrorHandler.handle_error(error, context)
+    end
+  end
+  
+  # Consistent error returns
+  defp validate_audio(data) when byte_size(data) == 0 do
+    {:error, :invalid_input, "Audio data cannot be empty"}
+  end
+  
+  defp validate_audio(data) when byte_size(data) > 10_485_760 do
+    {:error, :invalid_input, "Audio data exceeds 10MB limit"}
+  end
+  
+  defp validate_audio(data), do: {:ok, data}
+end
+```
+
+### 10.3 Controller Error Handling
+```elixir
+defmodule AybizaWeb.ErrorHelpers do
+  @moduledoc """
+  Standardized error responses for controllers
+  """
+  
+  import Plug.Conn
+  import Phoenix.Controller
+  
+  def handle_errors(conn, {:error, %{type: type, message: message} = error}) do
+    conn
+    |> put_status(error_to_status(type))
+    |> put_view(AybizaWeb.ErrorView)
+    |> render("error.json", error: error)
+  end
+  
+  def handle_errors(conn, {:error, reason}) when is_atom(reason) do
+    handle_errors(conn, {:error, %{type: reason, message: humanize_error(reason)}})
+  end
+  
+  defp error_to_status(:invalid_input), do: :bad_request
+  defp error_to_status(:not_found), do: :not_found
+  defp error_to_status(:unauthorized), do: :unauthorized
+  defp error_to_status(:rate_limited), do: :too_many_requests
+  defp error_to_status(:timeout), do: :request_timeout
+  defp error_to_status(:external_service_error), do: :bad_gateway
+  defp error_to_status(_), do: :internal_server_error
+  
+  defp humanize_error(error) do
+    error
+    |> Atom.to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+end
+
+# Usage in controller
+defmodule AybizaWeb.AgentController do
+  use AybizaWeb, :controller
+  import AybizaWeb.ErrorHelpers
+  
+  def show(conn, %{"id" => id}) do
+    case Aybiza.Agents.get_agent(id) do
+      {:ok, agent} ->
+        render(conn, "show.json", agent: agent)
+      
+      error ->
+        handle_errors(conn, error)
+    end
+  end
+end
 ```
 
 ### 9.2 Hot Code Deployment Patterns

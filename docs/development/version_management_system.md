@@ -227,7 +227,7 @@ jobs:
         uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18.3'
-          otp-version: '27.3.4'
+          otp-version: '28.0'
 
       - name: Configure Git
         run: |
@@ -298,7 +298,7 @@ Update Docker build process to use the VERSION file:
 
 ```dockerfile
 # Dockerfile modifications
-FROM hexpm/elixir:1.18.3-erlang-27.3.4-debian-bookworm-20250517 AS build
+FROM hexpm/elixir:1.18.3-erlang-28.0-debian-bookworm-20250517 AS build
 
 # ... existing build steps ...
 

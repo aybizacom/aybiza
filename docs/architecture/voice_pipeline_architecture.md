@@ -1,7 +1,7 @@
 # AYBIZA AI Voice Agent Platform - Voice Pipeline Architecture (Updated)
 
 ## Overview
-The Voice Pipeline is the core component of the AYBIZA platform's hybrid Cloudflare+AWS architecture, handling real-time processing of audio streams for AI voice agents with ultra-low latency targets: <50ms for US/UK and <100ms globally. The pipeline converts speech to text, processes through Claude 3.7 Sonnet with extended thinking, and converts responses back to speech.
+The Voice Pipeline is the core component of the AYBIZA platform's billion-scale hybrid Cloudflare+AWS architecture, handling real-time processing of audio streams for AI voice agents with ultra-low latency targets: <100ms globally. The pipeline converts speech to text, processes through Claude 4 Opus/Sonnet models with extended thinking and parallel tool execution, and converts responses back to speech while maintaining natural conversation flow.
 
 ## Hybrid Architecture Overview
 
@@ -21,11 +21,11 @@ Cloudflare Edge (300+ locations) →
 ```
 Twilio/SIP → Cloudflare Edge → 
   Edge Audio Processing → 
-    Speech-to-Text (Deepgram Nova-3) → 
+    Speech-to-Text (Deepgram Nova-3, <50ms) → 
       Context Management (Hybrid) → 
-        LLM Processing (Claude 3.7 Sonnet) → 
-          Automation Execution (if needed) →
-            Text-to-Speech (Deepgram Aura-2) → 
+        LLM Processing (Claude 4 Opus/Sonnet) → 
+          Tool Execution (Parallel, MCP, Code, Web) →
+            Text-to-Speech (Deepgram Aura-2, <20ms) → 
               Edge Audio Optimization → 
                 Twilio/SIP Output
 ```
@@ -34,7 +34,7 @@ Twilio/SIP → Cloudflare Edge →
 
 ### 1. Edge Audio Input Processing
 - **Responsibility**: Receive, decode, and optimize audio at Cloudflare edge
-- **Technology**: Cloudflare Workers, Membrane Framework 0.11.0+, WebSockets
+- **Technology**: Cloudflare Workers, Membrane Framework 1.2.3+, WebSockets
 - **Edge Locations**: 300+ global edge locations with <10ms routing
 - **Key Functions**:
   - WebSocket frame decoding at edge
@@ -54,7 +54,8 @@ defmodule Aybiza.VoicePipeline.EdgeAudioInput do
   @mulaw_silence_byte 0xFF
   @edge_vad_threshold 800  # Lower threshold for edge processing
   @frame_duration_ms 10    # Reduced frame duration for ultra-low latency
-  @edge_regions ["lax1", "dfw1", "lhr1", "fra1", "nrt1"]
+  @edge_regions ["lax1", "dfw1", "lhr1", "fra1", "nrt1", "syd1", "sin1"]
+  @model_selector Aybiza.Agents.ModelSelector
   
   @impl true
   def handle_init(_ctx, socket: socket, call_id: call_id, edge_region: edge_region) do
@@ -688,35 +689,42 @@ defmodule Aybiza.VoicePipeline.HybridConversationContext do
 end
 ```
 
-### 4. LLM Processing (Claude 3.7 Sonnet Enhanced)
-- **Responsibility**: Generate responses with extended thinking capabilities
-- **Technology**: AWS Bedrock with Claude 3.7 Sonnet, multi-region optimization
-- **Enhanced Features**: Extended thinking mode, dynamic model selection, cost optimization
-- **Performance**: Streaming responses with sentence-level TTS integration
+### 4. LLM Processing (Claude 4 Opus/Sonnet Enhanced)
+- **Responsibility**: Generate responses with extended thinking and parallel tool execution
+- **Technology**: AWS Bedrock with Claude 4 Opus/Sonnet, multi-region optimization
+- **Enhanced Features**: Extended thinking (30s), parallel tools, MCP, code execution, Files API
+- **Performance**: <100ms target with streaming and prompt caching (1-hour TTL)
 - **Key Functions**:
-  - Intelligent model selection (3.7 Sonnet/3.5 Sonnet/3.5 Haiku)
-  - Extended thinking for complex queries
-  - Streaming response processing with early TTS
-  - Function calling with automation integration
-  - Cost optimization through smart model switching
+  - Intelligent model selection (4.0 Opus/Sonnet/3.7/3.5/Haiku)
+  - Extended thinking for complex reasoning
+  - Parallel tool execution (up to 10 concurrent)
+  - MCP connectors for enterprise systems
+  - Code execution in sandboxed environment
+  - Files API for persistent storage
+  - Prompt caching with 90% cost reduction
 
-#### Implementation (Claude 3.7 Sonnet)
+#### Implementation (Claude 4 Enhanced)
 ```elixir
-defmodule Aybiza.VoicePipeline.Claude37SonnetProcessor do
+defmodule Aybiza.VoicePipeline.Claude4Processor do
   use GenServer
   require Logger
   
+  @claude_4_opus "anthropic.claude-opus-4-20250514-v1:0"
+  @claude_4_sonnet "anthropic.claude-sonnet-4-20250514-v1:0"
   @claude_3_7_sonnet "anthropic.claude-3-7-sonnet-20250219-v1:0"
   @claude_3_5_sonnet "anthropic.claude-3-5-sonnet-20241022-v2:0"
   @claude_3_5_haiku "anthropic.claude-3-5-haiku-20241022-v1:0"
-  @claude_3_haiku "anthropic.claude-3-haiku-20240307-v1:0"
   
   @model_latency_targets %{
-    @claude_3_7_sonnet => 300,  # 300ms for complex thinking
-    @claude_3_5_sonnet => 200,  # 200ms for standard queries
-    @claude_3_5_haiku => 100,   # 100ms for simple queries
-    @claude_3_haiku => 80       # 80ms for very simple queries
+    @claude_4_opus => 500,      # 500ms for extended thinking
+    @claude_4_sonnet => 200,    # 200ms with parallel tools
+    @claude_3_7_sonnet => 300,  # 300ms for complex queries
+    @claude_3_5_sonnet => 150,  # 150ms for standard queries
+    @claude_3_5_haiku => 50     # 50ms for ultra-fast responses
   }
+  
+  @prompt_cache_ttl 3600      # 1 hour cache TTL
+  @max_parallel_tools 10      # Maximum concurrent tool executions
   
   def start_link(opts) do
     call_id = Keyword.fetch!(opts, :call_id)
@@ -803,14 +811,22 @@ defmodule Aybiza.VoicePipeline.Claude37SonnetProcessor do
   end
   
   defp select_optimal_model_and_region(complexity, latency_requirement, cost_priority, edge_region) do
-    # Advanced model selection for Claude 3.7 Sonnet
+    # Advanced model selection for Claude 4 and 3.x models
     model_id = case {complexity, latency_requirement, cost_priority} do
+      {:extended_thinking, _, _} -> 
+        # Extended thinking always uses Claude 4 Opus
+        @claude_4_opus
+      
+      {:high, _, _} when complexity.requires_tools -> 
+        # Complex with multiple tools uses Claude 4 Sonnet
+        @claude_4_sonnet
+      
       {:high, _, _} -> 
-        # Complex queries always use Claude 3.7 Sonnet for best results
+        # Complex queries use Claude 3.7 Sonnet
         @claude_3_7_sonnet
       
       {:medium, :ultra_low, _} -> 
-        # Medium complexity with ultra-low latency needs
+        # Medium complexity with ultra-low latency
         @claude_3_5_haiku
       
       {:medium, _, :high_cost_savings} -> 
@@ -822,8 +838,8 @@ defmodule Aybiza.VoicePipeline.Claude37SonnetProcessor do
         @claude_3_5_sonnet
       
       {:low, :ultra_low, _} -> 
-        # Simple queries with ultra-low latency
-        @claude_3_haiku
+        # Simple queries with <50ms target
+        @claude_3_5_haiku
       
       {:low, _, _} -> 
         # Standard simple queries
@@ -1074,7 +1090,171 @@ defmodule Aybiza.VoicePipeline.Claude37SonnetProcessor do
 end
 ```
 
-### 5. Text-to-Speech (TTS) Processing - Aura-2 Enhanced
+### 5. Tool Execution Engine (Claude 4 Enhanced)
+- **Responsibility**: Execute tools in parallel during voice conversations
+- **Technology**: Elixir Task.async_stream, MCP protocol, sandboxed environments
+- **Enhanced Features**: Parallel execution, MCP connectors, code sandbox, Files API
+- **Performance**: Execute up to 10 tools concurrently with <500ms total latency
+- **Key Functions**:
+  - Parallel tool orchestration
+  - Natural acknowledgment during execution
+  - MCP connector management
+  - Code execution in sandbox
+  - Files API integration
+  - Web search with caching
+
+#### Implementation (Parallel Tool Executor)
+```elixir
+defmodule Aybiza.VoicePipeline.ParallelToolExecutor do
+  use GenServer
+  require Logger
+  
+  @max_parallel_tools 10
+  @tool_timeout_ms 5000
+  @acknowledgment_phrases [
+    "Let me check that for you...",
+    "I'm looking that up now...",
+    "Give me just a moment...",
+    "Let me find that information..."
+  ]
+  
+  def execute_tools(call_id, tool_requests, call_context) do
+    GenServer.call(via_tuple(call_id), {:execute_tools, tool_requests, call_context}, 10_000)
+  end
+  
+  @impl true
+  def handle_call({:execute_tools, tool_requests, call_context}, _from, state) do
+    # Acknowledge tool execution to user
+    acknowledgment = select_acknowledgment(tool_requests)
+    send_to_tts(call_context.call_id, acknowledgment)
+    
+    # Execute tools in parallel
+    results = tool_requests
+    |> Enum.take(@max_parallel_tools)
+    |> Task.async_stream(
+      fn tool_request -> 
+        execute_single_tool(tool_request, call_context, state)
+      end,
+      timeout: @tool_timeout_ms,
+      on_timeout: :kill_task
+    )
+    |> Enum.map(fn
+      {:ok, result} -> result
+      {:exit, :timeout} -> {:error, :timeout}
+      {:exit, reason} -> {:error, reason}
+    end)
+    
+    # Aggregate results
+    aggregated_results = aggregate_tool_results(results, tool_requests)
+    
+    # Update metrics
+    update_tool_metrics(state, tool_requests, results)
+    
+    {:reply, {:ok, aggregated_results}, state}
+  end
+  
+  defp execute_single_tool(tool_request, call_context, state) do
+    start_time = System.monotonic_time(:millisecond)
+    
+    result = case tool_request.tool_type do
+      :web_search ->
+        execute_web_search(tool_request.params)
+      
+      :code_execution ->
+        execute_code_sandbox(tool_request.params)
+      
+      :mcp_connector ->
+        execute_mcp_call(tool_request.params, call_context)
+      
+      :files_api ->
+        execute_files_operation(tool_request.params, call_context)
+      
+      :database_query ->
+        execute_database_query(tool_request.params, call_context)
+      
+      _ ->
+        execute_generic_tool(tool_request, call_context)
+    end
+    
+    duration = System.monotonic_time(:millisecond) - start_time
+    
+    %{
+      tool_name: tool_request.tool_name,
+      tool_type: tool_request.tool_type,
+      result: result,
+      duration_ms: duration,
+      timestamp: DateTime.utc_now()
+    }
+  end
+  
+  defp execute_web_search(params) do
+    # Check cache first
+    cache_key = generate_search_cache_key(params.query)
+    
+    case SearchCache.get(cache_key) do
+      {:ok, cached_result} ->
+        {:cached, cached_result}
+      
+      :miss ->
+        # Perform actual search
+        result = WebSearch.search(params.query, params.options)
+        SearchCache.put(cache_key, result, ttl: 300)
+        {:fresh, result}
+    end
+  end
+  
+  defp execute_code_sandbox(params) do
+    # Execute Python code in sandboxed environment
+    SandboxExecutor.execute_python(
+      params.code,
+      timeout: params.timeout || 3000,
+      memory_limit: "256MB"
+    )
+  end
+  
+  defp execute_mcp_call(params, call_context) do
+    # Execute MCP connector call
+    connector = MCPRegistry.get_connector(params.connector_id, call_context.tenant_id)
+    
+    case connector do
+      nil -> 
+        {:error, :connector_not_found}
+      
+      connector ->
+        MCPClient.execute(connector, params.method, params.args)
+    end
+  end
+  
+  defp select_acknowledgment(tool_requests) when length(tool_requests) > 1 do
+    "Let me check a few things for you..."
+  end
+  
+  defp select_acknowledgment([tool_request]) do
+    case tool_request.tool_type do
+      :web_search -> "Let me search for that information..."
+      :code_execution -> "Let me run that calculation..."
+      :database_query -> "Let me look that up in our records..."
+      _ -> Enum.random(@acknowledgment_phrases)
+    end
+  end
+  
+  defp aggregate_tool_results(results, tool_requests) do
+    successful = Enum.filter(results, &match?({:ok, _}, &1.result))
+    failed = Enum.filter(results, &match?({:error, _}, &1.result))
+    
+    %{
+      total_requested: length(tool_requests),
+      total_executed: length(results),
+      successful: length(successful),
+      failed: length(failed),
+      results: results,
+      total_duration_ms: Enum.sum(Enum.map(results, & &1.duration_ms))
+    }
+  end
+end
+```
+
+### 6. Text-to-Speech (TTS) Processing - Aura-2 Enhanced
 - **Responsibility**: Convert text responses to natural speech with ultra-low latency
 - **Technology**: Deepgram TTS API with Aura-2 voices, streaming optimization
 - **Enhanced Features**: Sentence-level streaming, natural speech patterns, emotion control
